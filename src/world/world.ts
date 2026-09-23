@@ -1,13 +1,19 @@
 import * as THREE from 'three';
-import { CHIPS } from '../game/content';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { POCKET_MOD_INFO, type PocketToolId } from '../game/content';
 import { FIELDS } from '../game/fields';
-import type { Pocket } from '../game/types';
+import type { ItemInstance, Pocket, ShopItem } from '../game/types';
 import { Figure } from './figure';
+import { buildFigurine, buildUpgradeBox, type Figurine } from './items3d';
 import {
-  DOOR, FIELD_RECTS, fieldAt, fieldCenter, KASSE, KASSE_SPOT, LAYOUT_BOUNDS, OBSTACLES, ROOM, TABLE,
-  TABLE_LAYOUT, TABLE_SPOT, TABLE_WHEEL,
+  DOOR, FIELD_RECTS, fieldAt, fieldCenter, itemSlot, KASSE, KASSE_SPOT, LAYOUT_BOUNDS, OBSTACLES, PHONE, PHONE_SPOT, ROOM,
+  TABLE, TABLE_LAYOUT, TABLE_SPOT, TABLE_WHEEL, VITRINE, VITRINE_SPOT,
 } from './layout';
-import { boardTexture, BOARD_SIZE, carpetTexture, chipTexture } from './textures';
+import { boardTexture, BOARD_SIZE, carpetTexture, chipSideTexture, chipTexture } from './textures';
 import { Wheel3D } from './wheel3d';
 
 const CHIP_H = 0.011;
@@ -23,7 +29,32 @@ interface Tween {
   done?: () => void;
 }
 
-export type CameraMode = 'room' | 'table' | 'wheel' | 'kasse' | 'caught';
+export type CameraMode = 'room' | 'table' | 'wheel' | 'kasse' | 'vitrine' | 'phone' | 'caught';
+
+/** Darkens the frame edges and adds a little film grain. */
+const VignetteShader = {
+  uniforms: { tDiffuse: { value: null }, time: { value: 0 }, strength: { value: 0.55 } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+  fragmentShader: `
+    uniform sampler2D tDiffuse; uniform float time; uniform float strength; varying vec2 vUv;
+    float rand(vec2 co) { return fract(sin(dot(co, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      float v = smoothstep(0.85, 0.2, length(d * vec2(1.1, 1.0)));
+      c.rgb *= mix(1.0 - strength, 1.0, v);
+      c.rgb += (rand(vUv * 800.0 + time) - 0.5) * 0.025;
+      gl_FragColor = c;
+    }`,
+};
+
+interface PlacedItem {
+  uid: number;
+  def: string;
+  fig: Figurine;
+  holder: THREE.Group;
+  jump: number;
+}
 
 function textTexture(text: string, w: number, h: number, font: string, color: string, glow?: string): THREE.CanvasTexture {
   const c = document.createElement('canvas');
@@ -66,13 +97,34 @@ export class World {
   private felt!: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
   private chipGeo = new THREE.CylinderGeometry(CHIP_R, CHIP_R, CHIP_H, 32);
-  private chipSide = new Map<string, THREE.MeshStandardMaterial>();
-  private chipMeshes = new Map<number, THREE.Mesh>();
-  private stacks = new Map<string, number[]>();
+  private chipMats = new Map<number, THREE.Material[]>();
+  private stacks = new Map<string, THREE.Mesh[]>();
   private highlights = new Map<string, THREE.Mesh>();
-  private coinMeshes = new Map<number, THREE.Object3D>();
+  private composer: EffectComposer;
+  private vignette: ShaderPass;
+  private shakeAmt = 0;
+  private dust!: THREE.Points;
+  private dustBase!: Float32Array;
+  private falling: { mesh: THREE.Mesh; vel: THREE.Vector3; spin: THREE.Vector3; life: number }[] = [];
+  private coinGeo = new THREE.CylinderGeometry(0.022, 0.022, 0.004, 20);
+  private coinMat = new THREE.MeshStandardMaterial({ color: 0xffc83d, emissive: 0x6a4000, metalness: 0.9, roughness: 0.25 });
+  /** Number cells lit up by the hovered bet. */
+  hoverCells = new Set<string>();
+  /** Number cells marked by a prediction card. */
+  markCells = new Set<string>();
   private ghost?: THREE.Mesh;
-  private ghostDef?: string;
+  private ghostValue?: number;
+  private tableGroup = new THREE.Group();
+  private placedItems: PlacedItem[] = [];
+  private slotPlates: THREE.Mesh[] = [];
+  private showcase = new THREE.Group();
+  private showcaseItems: { index: number; fig: Figurine; holder: THREE.Group }[] = [];
+  private phoneHandset = new THREE.Group();
+  private phoneLamp!: THREE.MeshStandardMaterial;
+  private phoneLight!: THREE.PointLight;
+  private marqueeCanvas = document.createElement('canvas');
+  private marqueeTex!: THREE.CanvasTexture;
+  phoneRinging = false;
   private tweens: Tween[] = [];
   private camPos = new THREE.Vector3(0, 5, 9);
   private camLook = new THREE.Vector3(0, 0.8, 0);
@@ -91,13 +143,24 @@ export class World {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.1;
+    this.renderer.toneMappingExposure = 0.95;
     container.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(0x07040a);
+    this.scene.fog = new THREE.FogExp2(0x12060c, 0.035);
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(512, 512), 0.45, 0.45, 0.93));
+    this.vignette = new ShaderPass(VignetteShader);
+    this.composer.addPass(this.vignette);
+    this.composer.addPass(new OutputPass());
     this.buildRoom();
+    this.buildAtmosphere();
     this.buildTable();
     this.buildKasse();
+    this.buildVitrine();
+    this.buildPhone();
+    this.buildMarquee();
 
     this.player.group.position.set(DOOR.x + 0.8, 0, DOOR.z + 2.2);
     this.player.heading = Math.PI * 0.8;
@@ -118,6 +181,7 @@ export class World {
   private resize(): void {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
+    this.composer?.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
@@ -216,7 +280,7 @@ export class World {
     };
     painting(ROOM.x0 + 0.04, -2.5, Math.PI / 2, 200);
     painting(ROOM.x0 + 0.04, 1.5, Math.PI / 2, 20);
-    painting(ROOM.x1 - 0.04, 1.2, -Math.PI / 2, 280);
+    painting(ROOM.x1 - 0.04, -1.4, -Math.PI / 2, 280);
 
     // Potted plants in the corners.
     const pot = new THREE.MeshStandardMaterial({ color: 0x6b3a1c, roughness: 0.6 });
@@ -232,20 +296,6 @@ export class World {
         l.castShadow = true;
         this.scene.add(l);
       }
-    }
-
-    // A small bar corner with bottles for flavor.
-    const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.4, 1.6, 2.4), panelMat);
-    shelf.position.set(ROOM.x0 + 0.2, 0.8, -0.5);
-    this.scene.add(shelf);
-    const bottleColors = [0x2f7a3a, 0x8a3a1a, 0xc9a13a, 0x3a5a8a];
-    for (let i = 0; i < 10; i++) {
-      const b = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.04, 0.05, 0.3, 10),
-        new THREE.MeshStandardMaterial({ color: bottleColors[i % 4], roughness: 0.1, transparent: true, opacity: 0.85 }),
-      );
-      b.position.set(ROOM.x0 + 0.3, 1.75, -1.5 + i * 0.22);
-      this.scene.add(b);
     }
 
     // Lighting.
@@ -271,12 +321,49 @@ export class World {
       }
       this.scene.add(ring, bulb, spot, spot.target);
     };
-    lamp(TABLE.x - 0.8, TABLE.z, 16, true);
-    lamp(TABLE.x + 0.9, TABLE.z, 16, false);
+    lamp(TABLE.x - 0.8, TABLE.z, 9, true);
+    lamp(TABLE.x + 0.9, TABLE.z, 9, false);
     lamp(KASSE.x, KASSE.z + 0.6, 16, false);
     lamp(-4.5, 2.5, 12, false);
     lamp(3.5, 2.5, 12, false);
     lamp(-4.5, -3, 8, false);
+  }
+
+  /** Light shafts under the table lamps and dust floating through them. */
+  private buildAtmosphere(): void {
+    const c = document.createElement('canvas');
+    c.width = 4;
+    c.height = 128;
+    const g = c.getContext('2d')!;
+    const grad = g.createLinearGradient(0, 0, 0, 128);
+    grad.addColorStop(0, 'rgba(255,220,160,0.9)');
+    grad.addColorStop(1, 'rgba(255,220,160,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 4, 128);
+    const tex = new THREE.CanvasTexture(c);
+    const shaftMat = new THREE.MeshBasicMaterial({
+      map: tex, transparent: true, opacity: 0.07, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide,
+    });
+    for (const [x, z] of [[TABLE.x - 0.8, TABLE.z], [TABLE.x + 0.9, TABLE.z], [KASSE.x, KASSE.z + 0.6]]) {
+      const h = ROOM.height - TABLE.height;
+      const cone = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 1.1, h, 32, 1, true), shaftMat);
+      cone.position.set(x, TABLE.height + h / 2, z);
+      this.scene.add(cone);
+    }
+    const n = 500;
+    const pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = TABLE.x + (Math.random() - 0.5) * 5;
+      pos[i * 3 + 1] = 0.3 + Math.random() * 2.9;
+      pos[i * 3 + 2] = TABLE.z + (Math.random() - 0.5) * 3.5;
+    }
+    this.dustBase = pos.slice();
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    this.dust = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xffe6b8, size: 0.012, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false,
+    }));
+    this.scene.add(this.dust);
   }
 
   private buildTable(): void {
@@ -327,6 +414,7 @@ export class World {
     const hlGeo = new THREE.PlaneGeometry(1, 1);
     for (const f of FIELDS) {
       const r = FIELD_RECTS[f.id];
+      if (!r) continue;
       const m = new THREE.Mesh(
         hlGeo,
         new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0, depthWrite: false }),
@@ -338,6 +426,8 @@ export class World {
       this.layout.add(m);
     }
     this.scene.add(this.layout);
+    this.tableGroup.position.set(T.x, T.height, T.z);
+    this.scene.add(this.tableGroup);
 
     const s = TABLE_WHEEL.scale;
     this.wheel.group.scale.setScalar(s);
@@ -435,6 +525,14 @@ export class World {
     return this.distTo(KASSE_SPOT) < 1.2;
   }
 
+  nearVitrine(): boolean {
+    return this.distTo(VITRINE_SPOT) < 1.1;
+  }
+
+  nearPhone(): boolean {
+    return this.distTo(PHONE_SPOT) < 1.1;
+  }
+
   /** Puts the player at the table (hidden, first-person) or back into the room. */
   standAtTable(atTable: boolean): void {
     const p = this.player.group.position;
@@ -446,9 +544,12 @@ export class World {
     this.velocity.set(0, 0, 0);
   }
 
-  standAtKasse(): void {
-    this.player.group.position.set(KASSE_SPOT.x, 0, KASSE_SPOT.z);
-    this.player.heading = Math.PI;
+  /** Places the player in front of the cashier, showcase or phone. */
+  standAt(where: 'kasse' | 'vitrine' | 'phone'): void {
+    const spot = where === 'kasse' ? KASSE_SPOT : where === 'vitrine' ? VITRINE_SPOT : PHONE_SPOT;
+    this.player.group.position.set(spot.x, 0, spot.z);
+    this.player.heading = where === 'kasse' ? Math.PI : where === 'vitrine' ? -Math.PI / 2 : Math.PI / 2;
+    this.player.group.visible = true;
     this.velocity.set(0, 0, 0);
   }
 
@@ -463,30 +564,27 @@ export class World {
     return fieldAt(local.x, local.z);
   }
 
-  refreshWheel(wheel: Pocket[], highlight?: number): void {
-    this.wheel.refresh(wheel, highlight);
+  refreshWheel(wheel: Pocket[], highlight?: number, marks?: number[]): void {
+    this.wheel.refresh(wheel, highlight, marks);
   }
 
   // ---- Chips -------------------------------------------------------------
 
-  private chipMaterials(def: string): THREE.Material[] {
-    let side = this.chipSide.get(def);
-    if (!side) {
-      side = new THREE.MeshStandardMaterial({ color: CHIPS[def].color, roughness: 0.4 });
-      this.chipSide.set(def, side);
+  private chipMaterials(value: number): THREE.Material[] {
+    let mats = this.chipMats.get(value);
+    if (!mats) {
+      const side = new THREE.MeshStandardMaterial({ map: chipSideTexture(value), roughness: 0.4 });
+      const face = new THREE.MeshStandardMaterial({ map: chipTexture(value), roughness: 0.35 });
+      mats = [side, face, face];
+      this.chipMats.set(value, mats);
     }
-    const face = new THREE.MeshStandardMaterial({
-      map: chipTexture(def),
-      roughness: 0.35,
-      transparent: def === 'glas',
-      opacity: def === 'glas' ? 0.8 : 1,
-    });
-    return [side.clone(), face, face];
+    return mats.map((m) => m.clone());
   }
 
-  private makeChip(def: string): THREE.Mesh {
-    const m = new THREE.Mesh(this.chipGeo, this.chipMaterials(def));
+  private makeChip(value: number): THREE.Mesh {
+    const m = new THREE.Mesh(this.chipGeo, this.chipMaterials(value));
     m.castShadow = true;
+    m.userData.value = value;
     return m;
   }
 
@@ -497,13 +595,13 @@ export class World {
   }
 
   /** Semi-transparent preview of the selected chip on the hovered field. */
-  setGhost(def: string | undefined, fieldId: string | undefined): void {
-    if (def !== this.ghostDef) {
+  setGhost(value: number | undefined, fieldId: string | undefined): void {
+    if (value !== this.ghostValue) {
       if (this.ghost) this.layout.remove(this.ghost);
       this.ghost = undefined;
-      this.ghostDef = def;
-      if (def) {
-        this.ghost = this.makeChip(def);
+      this.ghostValue = value;
+      if (value) {
+        this.ghost = this.makeChip(value);
         for (const m of this.ghost.material as THREE.MeshStandardMaterial[]) {
           m.transparent = true;
           m.opacity = 0.55;
@@ -521,16 +619,15 @@ export class World {
     }
   }
 
-  placeChip(uid: number, def: string, fieldId: string): void {
+  placeChip(fieldId: string, value: number): void {
     const stack = this.stacks.get(fieldId) ?? [];
-    stack.push(uid);
     this.stacks.set(fieldId, stack);
-    const mesh = this.makeChip(def);
-    const to = this.stackPos(fieldId, stack.length - 1);
+    const mesh = this.makeChip(value);
+    const to = this.stackPos(fieldId, stack.length);
+    stack.push(mesh);
     const from = new THREE.Vector3(to.x * 0.6, 0.25, 0.55);
     mesh.position.copy(from);
     this.layout.add(mesh);
-    this.chipMeshes.set(uid, mesh);
     this.tween(0.22, (u) => {
       mesh.position.lerpVectors(from, to, u);
       mesh.position.y += Math.sin(u * Math.PI) * 0.08;
@@ -539,10 +636,10 @@ export class World {
   }
 
   pickChip(fieldId: string): void {
-    const uid = this.stacks.get(fieldId)?.pop();
-    if (uid === undefined) return;
-    const mesh = this.chipMeshes.get(uid)!;
-    this.chipMeshes.delete(uid);
+    const stack = this.stacks.get(fieldId);
+    const mesh = stack?.pop();
+    if (!mesh) return;
+    if (!stack!.length) this.stacks.delete(fieldId);
     const from = mesh.position.clone();
     const to = new THREE.Vector3(from.x * 0.6, 0.25, 0.55);
     this.tween(0.2, (u) => {
@@ -551,40 +648,80 @@ export class World {
     }, () => this.layout.remove(mesh));
   }
 
-  /** Winning chips pop and sparkle, losing ones fade into the felt. */
-  resolveChips(results: { uid: number; won: boolean }[], broken: number[]): void {
-    const brokenSet = new Set(broken);
-    for (const r of results) {
-      const mesh = this.chipMeshes.get(r.uid);
-      if (!mesh) continue;
-      const base = mesh.position.clone();
-      if (r.won) {
-        this.tween(0.7, (u) => {
-          mesh.position.y = base.y + Math.sin(u * Math.PI) * 0.05;
-          mesh.rotation.y = u * Math.PI * 4;
-        }, () => {
-          if (brokenSet.has(r.uid)) {
-            this.burst(this.layout.localToWorld(mesh.position.clone()), 0x9fe3f0, 30);
-            mesh.visible = false;
-          }
-        });
-        this.burst(this.layout.localToWorld(base.clone()), 0xffd76a, 8);
-      } else {
+  /** Rebuilds all stacks from the bets, without animation (after loading or clearing). */
+  syncChips(bets: Record<string, number[]>): void {
+    for (const stack of this.stacks.values()) for (const m of stack) this.layout.remove(m);
+    this.stacks.clear();
+    for (const [fid, values] of Object.entries(bets)) {
+      const stack: THREE.Mesh[] = [];
+      values.forEach((v, i) => {
+        const m = this.makeChip(v);
+        m.position.copy(this.stackPos(fid, i));
+        this.layout.add(m);
+        stack.push(m);
+      });
+      this.stacks.set(fid, stack);
+    }
+  }
+
+  /** Losing stacks fade into the felt right after the ball lands. */
+  dimLosers(fieldIds: string[]): void {
+    for (const fid of fieldIds) {
+      for (const mesh of this.stacks.get(fid) ?? []) {
         const mats = mesh.material as THREE.MeshStandardMaterial[];
-        this.tween(0.8, (u) => {
+        this.tween(0.6, (u) => {
           for (const m of mats) {
             m.transparent = true;
-            m.opacity = 1 - u * 0.75;
+            m.opacity = 1 - u * 0.7;
           }
         });
       }
     }
   }
 
+  /** A winning stack jumps and sparkles while its payout is counted. Returns its world position. */
+  popField(fieldId: string, color = 0xffd76a): THREE.Vector3 {
+    const stack = this.stacks.get(fieldId) ?? [];
+    stack.forEach((mesh, i) => {
+      const base = this.stackPos(fieldId, i);
+      const mats = mesh.material as THREE.MeshStandardMaterial[];
+      this.tween(0.4, (u) => {
+        const k = Math.sin(u * Math.PI);
+        mesh.position.set(base.x, base.y + k * (0.03 + i * 0.004), base.z);
+        mesh.rotation.z = Math.sin(u * Math.PI * 2) * 0.25;
+        mats[0].emissive.setHex(0xffc850);
+        mats[0].emissiveIntensity = k * 0.9;
+      });
+    });
+    const world = this.fieldTopWorld(fieldId);
+    this.burst(world, color, 12);
+    return world;
+  }
+
+  /** Gold coins rain onto the table after a big win. */
+  coinShower(n: number): void {
+    const b = LAYOUT_BOUNDS;
+    for (let i = 0; i < n; i++) {
+      const mesh = new THREE.Mesh(this.coinGeo, this.coinMat);
+      mesh.position.set(b.x0 + Math.random() * (b.x1 - b.x0), 0.6 + Math.random() * 0.8, b.z0 + Math.random() * (b.z1 - b.z0));
+      mesh.castShadow = true;
+      this.layout.add(mesh);
+      this.falling.push({
+        mesh,
+        vel: new THREE.Vector3((Math.random() - 0.5) * 0.3, -Math.random() * 0.5, (Math.random() - 0.5) * 0.3),
+        spin: new THREE.Vector3(Math.random() * 12, Math.random() * 6, Math.random() * 12),
+        life: 2.6 + Math.random(),
+      });
+    }
+  }
+
+  shake(amount: number): void {
+    this.shakeAmt = Math.max(this.shakeAmt, amount);
+  }
+
   /** The croupier sweeps the table: all chips slide off towards the wheel. */
   clearChips(): void {
-    const meshes = [...this.chipMeshes.values()];
-    this.chipMeshes.clear();
+    const meshes = [...this.stacks.values()].flat();
     this.stacks.clear();
     for (const mesh of meshes) {
       const from = mesh.position.clone();
@@ -599,62 +736,218 @@ export class World {
     return this.layout.localToWorld(new THREE.Vector3(c.x, n * CHIP_H + 0.03, c.z));
   }
 
-  // ---- Coins -------------------------------------------------------------
+  // ---- Talismans on the table ---------------------------------------------
 
-  setCoins(coins: { id: number; x: number; z: number; kind: 'coin' | 'star' }[]): void {
-    for (const [id, m] of this.coinMeshes) {
-      if (!coins.some((c) => c.id === id)) {
-        this.scene.remove(m);
-        this.coinMeshes.delete(id);
+  /** Shows the player's talismans on the table, in order, with a plate per free slot. */
+  setItems(items: ItemInstance[], slots: number): void {
+    const keep = new Map(this.placedItems.map((p) => [p.uid, p]));
+    const next: PlacedItem[] = [];
+    for (const it of items) {
+      let p = keep.get(it.uid);
+      if (!p) {
+        const fig = buildFigurine(it.def);
+        const holder = new THREE.Group();
+        holder.add(fig.group);
+        holder.userData.itemUid = it.uid;
+        this.tableGroup.add(holder);
+        p = { uid: it.uid, def: it.def, fig, holder, jump: 1 };
+        this.burst(this.tableGroup.localToWorld(new THREE.Vector3(itemSlot(next.length, slots).x, 0.05, itemSlot(next.length, slots).z)), 0xffd76a, 20, 0.02);
       }
+      keep.delete(it.uid);
+      next.push(p);
     }
-    for (const c of coins) {
-      if (this.coinMeshes.has(c.id)) continue;
-      let m: THREE.Mesh;
-      if (c.kind === 'coin') {
-        m = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.13, 0.13, 0.03, 24),
-          new THREE.MeshStandardMaterial({ color: 0xffc83d, emissive: 0x9a6a00, metalness: 0.7, roughness: 0.25 }),
-        );
-        m.rotation.x = Math.PI / 2;
-      } else {
-        m = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(0.13, 0),
-          new THREE.MeshStandardMaterial({ color: 0xff7ad9, emissive: 0xb03080, metalness: 0.3, roughness: 0.2 }),
-        );
-      }
-      m.castShadow = true;
+    for (const p of keep.values()) this.tableGroup.remove(p.holder);
+    this.placedItems = next;
+    for (const m of this.slotPlates) this.tableGroup.remove(m);
+    this.slotPlates = [];
+    const plateMat = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, roughness: 0.35, metalness: 0.9 });
+    for (let i = 0; i < slots; i++) {
+      const s = itemSlot(i, slots);
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.048, 0.006, 28), plateMat);
+      plate.position.set(s.x, 0.003, s.z);
+      plate.receiveShadow = true;
+      this.tableGroup.add(plate);
+      this.slotPlates.push(plate);
+      if (next[i]) next[i].holder.position.set(s.x, 0.006, s.z);
+    }
+    next.forEach((p, i) => (p.holder.visible = i < slots));
+  }
+
+  /** Talisman under the pointer, if any. */
+  pickItem(clientX: number, clientY: number): number | undefined {
+    const ndc = new THREE.Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    const hit = this.raycaster.intersectObjects(this.placedItems.map((p) => p.holder), true)[0];
+    let o: THREE.Object3D | null = hit?.object ?? null;
+    while (o && o.userData.itemUid === undefined) o = o.parent;
+    return o?.userData.itemUid;
+  }
+
+  /** A talisman hops and sparkles when it takes effect. Returns its world position. */
+  triggerItem(uid: number): THREE.Vector3 | undefined {
+    const p = this.placedItems.find((x) => x.uid === uid);
+    if (!p) return undefined;
+    p.jump = 1;
+    const top = p.holder.localToWorld(new THREE.Vector3(0, p.fig.height + 0.02, 0));
+    this.burst(top, 0xffe08a, 14);
+    return top;
+  }
+
+  itemTopWorld(uid: number): THREE.Vector3 | undefined {
+    const p = this.placedItems.find((x) => x.uid === uid);
+    return p?.holder.localToWorld(new THREE.Vector3(0, p.fig.height + 0.03, 0));
+  }
+
+  // ---- Showcase, phone and marquee -------------------------------------------
+
+  private buildVitrine(): void {
+    const V = VITRINE;
+    const wood = new THREE.MeshStandardMaterial({ color: 0x2e140a, roughness: 0.45 });
+    const brass = new THREE.MeshStandardMaterial({ color: 0xc9a04a, roughness: 0.3, metalness: 0.85 });
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0xcfe6ff, transparent: true, opacity: 0.12, roughness: 0.02, depthWrite: false });
+    const g = new THREE.Group();
+    g.position.set(V.x, 0, V.z);
+    const base = new THREE.Mesh(new THREE.BoxGeometry(V.halfW * 2, 0.7, V.halfD * 2), wood);
+    base.position.y = 0.35;
+    base.castShadow = base.receiveShadow = true;
+    const top = new THREE.Mesh(new THREE.BoxGeometry(V.halfW * 2 + 0.04, 0.08, V.halfD * 2 + 0.04), wood);
+    top.position.y = V.height;
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.04, V.height - 0.7, V.halfD * 2), new THREE.MeshStandardMaterial({ color: 0x4a0f1c, roughness: 0.95 }));
+    back.position.set(-V.halfW + 0.02, 0.7 + (V.height - 0.7) / 2, 0);
+    const front = new THREE.Mesh(new THREE.PlaneGeometry(V.halfD * 2, V.height - 0.7), glass);
+    front.rotation.y = Math.PI / 2;
+    front.position.set(V.halfW, 0.7 + (V.height - 0.7) / 2, 0);
+    g.add(base, top, back, front);
+    for (const z of [-V.halfD, V.halfD]) {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(V.halfW * 2, V.height - 0.7, 0.03), brass);
+      post.position.set(0, 0.7 + (V.height - 0.7) / 2, z);
+      g.add(post);
+    }
+    for (const y of [0.72, 1.3]) {
+      const shelf = new THREE.Mesh(new THREE.BoxGeometry(V.halfW * 2 - 0.06, 0.02, V.halfD * 2 - 0.06), new THREE.MeshPhysicalMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, roughness: 0.05 }));
+      shelf.position.y = y;
+      g.add(shelf);
+    }
+    const light = new THREE.PointLight(0xffe0b0, 2.5, 2.5, 2);
+    light.position.set(0.1, V.height - 0.1, 0);
+    g.add(light);
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(1.2, 0.3),
+      new THREE.MeshBasicMaterial({ map: textTexture('Kuriositäten', 512, 128, 'italic 700 72px Georgia, serif', '#ffe6a0', '#ffae00'), transparent: true }),
+    );
+    sign.rotation.y = Math.PI / 2;
+    sign.position.set(V.halfW + 0.01, V.height + 0.25, 0);
+    g.add(sign, this.showcase);
+    this.scene.add(g);
+  }
+
+  /** Puts the showcase stock on its shelves; sold pieces disappear. */
+  setShowcase(shop: ShopItem[]): void {
+    for (const s of this.showcaseItems) this.showcase.remove(s.holder);
+    this.showcaseItems = [];
+    const V = VITRINE;
+    shop.forEach((it, i) => {
+      if (it.sold) return;
+      const fig = it.kind === 'item' ? buildFigurine(it.def) : buildUpgradeBox(POCKET_MOD_INFO[it.def as keyof typeof POCKET_MOD_INFO]?.color ?? (it.def as PocketToolId === 'pinsel' ? '#e8e0d0' : '#7a7aff'));
       const holder = new THREE.Group();
-      holder.add(m);
-      holder.position.set(c.x, 0.35, c.z);
-      holder.userData = { kind: c.kind, seed: c.id };
-      this.coinMeshes.set(c.id, holder);
-      this.scene.add(holder);
-    }
+      holder.add(fig.group);
+      holder.scale.setScalar(it.kind === 'item' ? 2.2 : 1.6);
+      const row = it.kind === 'item' ? 1 : 0;
+      const col = it.kind === 'item' ? i : i - 4;
+      const perRow = it.kind === 'item' ? 4 : 2;
+      holder.position.set(0.05, row ? 1.31 : 0.73, -V.halfD + 0.25 + (col + 0.5) * ((V.halfD * 2 - 0.5) / perRow));
+      holder.rotation.y = Math.PI / 2;
+      this.showcase.add(holder);
+      this.showcaseItems.push({ index: i, fig, holder });
+    });
   }
 
-  coinsNearPlayer(): number[] {
-    if (!this.player.group.visible) return [];
-    const p = this.player.group.position;
-    const out: number[] = [];
-    for (const [id, m] of this.coinMeshes) {
-      if (Math.hypot(m.position.x - p.x, m.position.z - p.z) < 0.55) out.push(id);
+  private buildPhone(): void {
+    const g = new THREE.Group();
+    g.position.set(PHONE.x, PHONE.y, PHONE.z);
+    g.rotation.y = -Math.PI / 2;
+    const board = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.03), new THREE.MeshStandardMaterial({ color: 0x3a1a0c, roughness: 0.5 }));
+    const red = new THREE.MeshStandardMaterial({ color: 0xb0101c, roughness: 0.3, metalness: 0.1 });
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.24, 0.1), red);
+    body.position.z = 0.065;
+    const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.012, 24), new THREE.MeshStandardMaterial({ color: 0xf0e8d8, roughness: 0.4 }));
+    dial.rotation.x = Math.PI / 2;
+    dial.position.set(0, -0.03, 0.121);
+    const hand = new THREE.Mesh(new THREE.CapsuleGeometry(0.022, 0.16, 6, 12), red);
+    hand.rotation.z = Math.PI / 2;
+    this.phoneHandset.add(hand);
+    for (const x of [-0.09, 0.09]) {
+      const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.03, 12), red);
+      cup.position.set(x, -0.012, 0);
+      this.phoneHandset.add(cup);
     }
-    return out;
+    this.phoneHandset.position.set(0, 0.1, 0.13);
+    this.phoneLamp = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff2020, emissiveIntensity: 0 });
+    const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.03, 12, 10), this.phoneLamp);
+    lamp.position.set(0, 0.22, 0.03);
+    g.add(board, body, dial, this.phoneHandset, lamp);
+    g.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true;
+    });
+    g.scale.setScalar(1.4);
+    const sconce = new THREE.PointLight(0xffb070, 3, 3, 2);
+    sconce.position.set(PHONE.x - 0.4, PHONE.y + 0.6, PHONE.z);
+    this.phoneLight = new THREE.PointLight(0xff2020, 0, 2.5, 2);
+    this.phoneLight.position.set(PHONE.x - 0.3, PHONE.y + 0.2, PHONE.z);
+    const sign = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.8, 0.2),
+      new THREE.MeshBasicMaterial({ map: textTexture('TELEFON', 512, 128, '700 80px Georgia, serif', '#ffd0d0', '#ff3030'), transparent: true }),
+    );
+    sign.rotation.y = -Math.PI / 2;
+    sign.position.set(PHONE.x - 0.02, PHONE.y + 0.62, PHONE.z);
+    this.scene.add(g, sconce, this.phoneLight, sign);
   }
 
-  collectCoinFx(id: number): THREE.Vector3 | undefined {
-    const m = this.coinMeshes.get(id);
-    if (!m) return undefined;
-    this.coinMeshes.delete(id);
-    this.burst(m.position, m.userData.kind === 'star' ? 0xff7ad9 : 0xffc83d, 20, 0.04);
-    const from = m.position.clone();
-    this.tween(0.35, (u) => {
-      m.position.y = from.y + u * 1.2;
-      m.scale.setScalar(1 - u);
-    }, () => this.scene.remove(m));
-    this.player.bounce();
-    return from;
+  /** Board next to the wheel with the last numbers and the next rate, like in real casinos. */
+  private buildMarquee(): void {
+    this.marqueeCanvas.width = 256;
+    this.marqueeCanvas.height = 512;
+    this.marqueeTex = new THREE.CanvasTexture(this.marqueeCanvas);
+    this.marqueeTex.colorSpace = THREE.SRGBColorSpace;
+    const g = new THREE.Group();
+    g.position.set(TABLE.x - TABLE.halfW + 0.05, 0, TABLE.z - TABLE.halfD - 0.15);
+    g.rotation.y = 0.5;
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.5, 12), new THREE.MeshStandardMaterial({ color: 0xc9a04a, metalness: 0.85, roughness: 0.3 }));
+    pole.position.y = 0.75;
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.62, 0.05), new THREE.MeshStandardMaterial({ color: 0x111114, roughness: 0.4 }));
+    frame.position.y = 1.75;
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.58), new THREE.MeshBasicMaterial({ map: this.marqueeTex, toneMapped: false }));
+    screen.position.set(0, 1.75, 0.026);
+    g.add(pole, frame, screen);
+    this.scene.add(g);
+    this.setMarquee([], 0, 0, 0);
+  }
+
+  setMarquee(history: { n: number; c: string }[], debt: number, round: number, rounds: number): void {
+    const c = this.marqueeCanvas;
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#050305';
+    g.fillRect(0, 0, c.width, c.height);
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillStyle = '#ffcf5a';
+    g.font = '700 26px monospace';
+    g.fillText('RATE', 128, 34);
+    g.font = '700 44px monospace';
+    g.fillText('$' + debt.toLocaleString('de-DE'), 128, 76);
+    g.font = '700 24px monospace';
+    g.fillStyle = '#ff7a5a';
+    g.fillText(rounds ? `RUNDE ${Math.min(round, rounds)}/${rounds}` : '', 128, 116);
+    g.fillStyle = '#3a2a1a';
+    g.fillRect(20, 140, 216, 3);
+    history.slice(0, 8).forEach((h, i) => {
+      const y = 180 + i * 42;
+      const x = h.c === 'red' ? 90 : h.c === 'black' ? 166 : 128;
+      g.fillStyle = h.c === 'red' ? '#ff3b4a' : h.c === 'black' ? '#e8e8f0' : '#3fe07a';
+      g.font = `700 ${i === 0 ? 40 : 32}px monospace`;
+      g.fillText(String(h.n), x, y);
+    });
+    this.marqueeTex.needsUpdate = true;
   }
 
   // ---- Debt collectors ---------------------------------------------------
@@ -760,10 +1053,51 @@ export class World {
         this.sparks.splice(this.sparks.indexOf(s), 1);
       }
     }
-    for (const m of this.coinMeshes.values()) {
-      m.children[0].rotation.y += dt * 2.5;
-      m.position.y = 0.35 + Math.sin(this.time * 3 + m.userData.seed) * 0.05;
+    for (const f of [...this.falling]) {
+      f.life -= dt;
+      f.vel.y -= 3.2 * dt;
+      f.mesh.position.addScaledVector(f.vel, dt);
+      f.mesh.rotation.x += f.spin.x * dt;
+      f.mesh.rotation.z += f.spin.z * dt;
+      if (f.mesh.position.y < 0.002) {
+        f.mesh.position.y = 0.002;
+        f.vel.y *= -0.35;
+        f.vel.x *= 0.6;
+        f.vel.z *= 0.6;
+        f.spin.multiplyScalar(0.5);
+        if (Math.abs(f.vel.y) < 0.05) {
+          f.vel.set(0, 0, 0);
+          f.mesh.rotation.set(0, f.mesh.rotation.y, 0);
+        }
+      }
+      if (f.life < 0.5) f.mesh.scale.setScalar(Math.max(0.001, f.life / 0.5));
+      if (f.life <= 0) {
+        this.layout.remove(f.mesh);
+        this.falling.splice(this.falling.indexOf(f), 1);
+      }
     }
+    const dp = this.dust.geometry.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < dp.count; i++) {
+      const t = this.time * 0.15 + i;
+      dp.setXYZ(i, this.dustBase[i * 3] + Math.sin(t) * 0.15, this.dustBase[i * 3 + 1] + Math.sin(t * 0.7) * 0.1, this.dustBase[i * 3 + 2] + Math.cos(t * 0.9) * 0.15);
+    }
+    dp.needsUpdate = true;
+    for (const p of this.placedItems) {
+      p.fig.animate?.(this.time);
+      p.jump = Math.max(0, p.jump - dt * 2.5);
+      const k = Math.sin(p.jump * Math.PI);
+      p.fig.group.position.y = k * 0.04;
+      p.fig.group.scale.setScalar(1 + k * 0.25);
+    }
+    for (const s of this.showcaseItems) {
+      s.fig.animate?.(this.time);
+      s.fig.group.rotation.y = this.time * 0.5 + s.index;
+    }
+    const ring = this.phoneRinging && Math.sin(this.time * 18) > 0 && this.time % 2 < 1.2;
+    this.phoneHandset.position.y = 0.1 + (ring ? 0.012 : 0);
+    this.phoneHandset.rotation.z = ring ? Math.sin(this.time * 60) * 0.08 : 0;
+    this.phoneLamp.emissiveIntensity = this.phoneRinging ? (Math.sin(this.time * 6) > 0 ? 3 : 0.2) : 0;
+    this.phoneLight.intensity = this.phoneRinging ? (Math.sin(this.time * 6) > 0 ? 4 : 0) : 0;
 
     const pulse = 0.3 + 0.2 * Math.sin(this.time * 6);
     for (const [id, m] of this.highlights) {
@@ -772,9 +1106,12 @@ export class World {
       if (this.pulseFields.has(id)) {
         target = pulse + 0.1;
         mat.color.setHex(0xffd24a);
-      } else if (id === this.hoverField) {
-        target = 0.28;
+      } else if (id === this.hoverField || this.hoverCells.has(id)) {
+        target = id === this.hoverField ? 0.3 : 0.2;
         mat.color.setHex(0xfff2b0);
+      } else if (this.markCells.has(id)) {
+        target = 0.2 + 0.12 * Math.sin(this.time * 4);
+        mat.color.setHex(0xb48cff);
       }
       mat.opacity += (target - mat.opacity) * Math.min(1, dt * 14);
     }
@@ -791,7 +1128,8 @@ export class World {
     this.updateThugs(dt);
 
     this.updateCamera(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.vignette.uniforms.time.value = this.time % 10;
+    this.composer.render(dt);
   }
 
   private updateCamera(dt: number): void {
@@ -810,19 +1148,30 @@ export class World {
         // Keep the whole layout in view above the hand bar, also on narrow screens.
         const aspect = this.camera.aspect;
         const back = aspect < 1.5 ? 1 + (1.5 - aspect) * 1.1 : 1;
-        pos.set(L.x, L.y + 1.2 * back, L.z + 0.62 * back);
-        look.set(L.x, L.y, L.z + 0.16 * back);
+        pos.set(L.x, L.y + 1.2 * back, L.z + 0.7 * back);
+        look.set(L.x, L.y, L.z + 0.02 * back);
         rate = 5;
         break;
       }
-      case 'wheel':
-        pos.set(W.x + 0.15, TABLE.height + 0.95, W.z + 0.6);
+      case 'wheel': {
+        // Push in slowly while the ball loses speed.
+        const k = this.wheel.progress * this.wheel.progress;
+        pos.set(W.x + 0.15 - k * 0.1, TABLE.height + 0.95 - k * 0.4, W.z + 0.6 - k * 0.12);
         look.set(W.x, TABLE.height + 0.05, W.z + 0.04);
         rate = 3.5;
         break;
+      }
       case 'kasse':
         pos.set(KASSE.x - 1.2, 2.2, KASSE.z + 3.3);
         look.set(KASSE.x, 1.3, KASSE.z);
+        break;
+      case 'vitrine':
+        pos.set(VITRINE.x + 2.2, 1.7, VITRINE.z + 0.6);
+        look.set(VITRINE.x, 1.1, VITRINE.z);
+        break;
+      case 'phone':
+        pos.set(PHONE.x - 1.6, 1.75, PHONE.z + 0.9);
+        look.set(PHONE.x, PHONE.y, PHONE.z);
         break;
       case 'caught':
         pos.set(p.x + 1.6, 1.9, p.z + 2.8);
@@ -835,5 +1184,12 @@ export class World {
     this.camLook.lerp(look, k);
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
+    if (this.shakeAmt > 0.001) {
+      const a = this.shakeAmt;
+      this.camera.position.x += (Math.random() - 0.5) * a * 0.06;
+      this.camera.position.y += (Math.random() - 0.5) * a * 0.06;
+      this.camera.rotation.z += (Math.random() - 0.5) * a * 0.03;
+      this.shakeAmt *= Math.exp(-6 * dt);
+    }
   }
 }

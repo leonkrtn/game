@@ -34,6 +34,8 @@ export class Wheel3D {
   private texture: THREE.CanvasTexture;
   private anim?: SpinAnim;
   private ballAngle = 0;
+  private pendingHop?: number;
+  private hop?: { t: number; from: number; delta: number };
   private idleSpeed = 0.15;
   onTick?: (strength: number) => void;
 
@@ -124,16 +126,21 @@ export class Wheel3D {
   }
 
   get spinning(): boolean {
-    return !!this.anim;
+    return !!this.anim || !!this.hop;
   }
 
-  refresh(wheel: Pocket[], highlight?: number): void {
-    drawWheelTexture(this.canvas, wheel, highlight);
+  /** 0..1 progress of the current spin (0 when idle). */
+  get progress(): number {
+    return this.anim ? this.anim.t / this.anim.duration : 0;
+  }
+
+  refresh(wheel: Pocket[], highlight?: number, marks?: number[]): void {
+    drawWheelTexture(this.canvas, wheel, highlight, marks);
     this.texture.needsUpdate = true;
   }
 
-  /** Starts a spin that ends with the ball resting in `target`. */
-  spin(target: number, duration = 6): void {
+  /** Starts a spin that ends with the ball resting in `target`, optionally hopping on into `hopTo`. */
+  spin(target: number, duration = 6, hopTo?: number): void {
     const r0 = this.rotor.rotation.y;
     const dr = TAU * (1.4 + Math.random() * 0.6);
     const b0 = r0 + Math.random() * TAU;
@@ -141,16 +148,21 @@ export class Wheel3D {
     let db = pocketAngle(target) + r0 + dr - b0;
     db = ((db % TAU) + TAU) % TAU - TAU * 6;
     this.anim = { t: 0, duration, r0, dr, b0, db, target, lastPocket: -1 };
+    this.pendingHop = hopTo;
     this.ball.visible = true;
   }
 
-  /** Advances the animation. Returns true on the frame the ball comes to rest. */
-  update(dt: number, speedUp = 1): boolean {
+  /**
+   * Advances the animation. Returns 'landed' when the ball first rests, 'hopped' when a lucky hop
+   * finished, and 'done' on the frame the ball is finally at rest.
+   */
+  update(dt: number, speedUp = 1): 'none' | 'landed' | 'done' {
+    if (this.hop) return this.updateHop(dt * speedUp);
     const a = this.anim;
     if (!a) {
       this.rotor.rotation.y += this.idleSpeed * dt;
       if (this.ball.visible) this.placeBall(0, POCKET_R, DISC_Y + 0.12, true);
-      return false;
+      return 'none';
     }
     a.t = Math.min(a.duration, a.t + dt * speedUp);
     const u = a.t / a.duration;
@@ -174,9 +186,35 @@ export class Wheel3D {
     if (a.t >= a.duration) {
       this.ballAngle = pocketAngle(a.target);
       this.anim = undefined;
-      return true;
+      if (this.pendingHop !== undefined) {
+        const from = pocketAngle(a.target);
+        let delta = pocketAngle(this.pendingHop) - from;
+        delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+        this.hop = { t: -0.55, from, delta };
+        this.pendingHop = undefined;
+        return 'landed';
+      }
+      return 'done';
     }
-    return false;
+    return 'none';
+  }
+
+  /** The ball sits for a moment, then jumps over the separator into the lucky pocket. */
+  private updateHop(dt: number): 'none' | 'done' {
+    const h = this.hop!;
+    this.rotor.rotation.y += this.idleSpeed * dt;
+    h.t += dt;
+    const u = Math.max(0, Math.min(1, h.t / 0.5));
+    const lift = Math.sin(u * Math.PI) * 0.9;
+    this.ballAngle = h.from + h.delta * smooth(u);
+    const world = this.rotor.rotation.y + this.ballAngle;
+    this.ball.position.set(Math.cos(world) * (POCKET_R + lift * 0.3), DISC_Y + 0.12 + lift + BALL_R * 0.4, -Math.sin(world) * (POCKET_R + lift * 0.3));
+    if (h.t >= 0.5) {
+      this.hop = undefined;
+      this.onTick?.(1);
+      return 'done';
+    }
+    return 'none';
   }
 
   private placeBall(angle: number, r: number, y: number, attached: boolean): void {

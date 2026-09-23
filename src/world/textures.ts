@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CHIPS, POCKET_MOD_INFO } from '../game/content';
+import { CHIP_COLORS, chipLabel, POCKET_MOD_INFO } from '../game/content';
 import { FIELDS } from '../game/fields';
 import type { Pocket } from '../game/types';
 import { POCKET_COUNT, standardColor } from '../game/wheel';
@@ -47,6 +47,7 @@ export function boardTexture(): THREE.CanvasTexture {
 
   for (const f of FIELDS) {
     const r = FIELD_RECTS[f.id];
+    if (!r) continue;
     const x = px(r.x0), y = pz(r.z0), w = (r.x1 - r.x0) * ppu, h = (r.z1 - r.z0) * ppu;
     const cx = x + w / 2, cy = y + h / 2;
     if (f.kind === 'straight') {
@@ -112,7 +113,7 @@ export function pocketAngle(index: number): number {
 
 export const WHEEL_RADII = { disc: 4.2, numbersIn: 3.55, pocketsIn: 2.85 };
 
-export function drawWheelTexture(c: HTMLCanvasElement, wheel: Pocket[], highlight?: number): void {
+export function drawWheelTexture(c: HTMLCanvasElement, wheel: Pocket[], highlight?: number, marks: number[] = []): void {
   const g = c.getContext('2d')!;
   const S = c.width;
   const cx = S / 2, cy = S / 2;
@@ -156,6 +157,11 @@ export function drawWheelTexture(c: HTMLCanvasElement, wheel: Pocket[], highligh
       const info = POCKET_MOD_INFO[p.mod];
       seg(WHEEL_RADII.pocketsIn, WHEEL_RADII.pocketsIn + 0.22, a, info.color);
       seg(WHEEL_RADII.disc - 0.2, WHEEL_RADII.disc - 0.05, a, info.color);
+    }
+    if (marks.includes(p.index)) {
+      g.globalAlpha = 0.55;
+      seg(WHEEL_RADII.pocketsIn, WHEEL_RADII.disc, a, '#b48cff');
+      g.globalAlpha = 1;
     }
     if (highlight === p.index) {
       g.globalAlpha = 0.45;
@@ -201,39 +207,59 @@ function shade(hex: string, amt: number): string {
 
 // ---- Chips ---------------------------------------------------------------
 
-const chipCache = new Map<string, THREE.CanvasTexture>();
+const chipCache = new Map<number, THREE.CanvasTexture>();
 
-export function chipTexture(def: string): THREE.CanvasTexture {
-  const hit = chipCache.get(def);
+/** Face of a casino chip of the given value. */
+export function chipTexture(value: number): THREE.CanvasTexture {
+  const hit = chipCache.get(value);
   if (hit) return hit;
-  const d = CHIPS[def];
+  const d = CHIP_COLORS[value] ?? CHIP_COLORS[1];
   const [c, g] = canvas(256, 256);
-  g.fillStyle = d.color;
+  g.fillStyle = d.face;
   g.beginPath();
   g.arc(128, 128, 128, 0, Math.PI * 2);
   g.fill();
-  // Edge stripes like a real casino chip.
   g.fillStyle = d.rim;
-  for (let i = 0; i < 8; i++) {
-    const a = (i / 8) * Math.PI * 2;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
     g.beginPath();
-    g.arc(128, 128, 128, a - 0.16, a + 0.16);
-    g.arc(128, 128, 100, a + 0.16, a - 0.16, true);
+    g.arc(128, 128, 128, a - 0.18, a + 0.18);
+    g.arc(128, 128, 96, a + 0.18, a - 0.18, true);
     g.closePath();
     g.fill();
   }
   g.strokeStyle = d.rim;
-  g.lineWidth = 6;
+  g.lineWidth = 5;
+  g.setLineDash([10, 8]);
   g.beginPath();
-  g.arc(128, 128, 78, 0, Math.PI * 2);
+  g.arc(128, 128, 80, 0, Math.PI * 2);
   g.stroke();
+  g.setLineDash([]);
   g.fillStyle = d.rim;
-  g.font = '700 70px Georgia, serif';
+  const label = chipLabel(value);
+  g.font = `700 ${label.length > 2 ? 58 : 76}px Georgia, serif`;
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.fillText(String(d.value), 128, 134);
+  g.fillText(label, 128, 134);
   const t = finish(c);
-  chipCache.set(def, t);
+  chipCache.set(value, t);
+  return t;
+}
+
+const sideCache = new Map<number, THREE.CanvasTexture>();
+
+/** Edge of a casino chip: colored rim with light inserts. */
+export function chipSideTexture(value: number): THREE.CanvasTexture {
+  const hit = sideCache.get(value);
+  if (hit) return hit;
+  const d = CHIP_COLORS[value] ?? CHIP_COLORS[1];
+  const [c, g] = canvas(256, 16);
+  g.fillStyle = d.face;
+  g.fillRect(0, 0, 256, 16);
+  g.fillStyle = d.rim;
+  for (let i = 0; i < 6; i++) g.fillRect(i * 43 + 8, 0, 14, 16);
+  const t = finish(c);
+  sideCache.set(value, t);
   return t;
 }
 

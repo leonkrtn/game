@@ -77,7 +77,17 @@ class Sfx {
     this.tone(300, 0.35, 'sawtooth', 0.06, 0, -150);
   }
   line(i: number): void {
-    this.tone(600 + i * 70, 0.08, 'square', 0.05);
+    this.tone(520 * Math.pow(2, Math.min(i, 18) / 12), 0.09, 'triangle', 0.12);
+    this.noise(0.03, 0.2, 4200);
+  }
+  mult(i: number): void {
+    this.tone(330 * Math.pow(2, Math.min(i, 18) / 12), 0.14, 'square', 0.07);
+    this.tone(660 * Math.pow(2, Math.min(i, 18) / 12), 0.1, 'sine', 0.06, 0.03);
+  }
+  ring(): void {
+    for (let k = 0; k < 2; k++) {
+      for (let i = 0; i < 8; i++) this.tone(i % 2 ? 1400 : 1150, 0.045, 'square', 0.035, k * 0.5 + i * 0.05);
+    }
   }
   coin(): void {
     this.tone(988, 0.08, 'square', 0.1);
