@@ -7,14 +7,14 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { CHIP_COLORS, POCKET_MOD_INFO, type PocketToolId } from '../game/content';
+import { BALLS, CHIP_COLORS, POCKET_MOD_INFO, type PocketToolId } from '../game/content';
 import { FIELDS } from '../game/fields';
 import type { ItemInstance, Pocket, ShopItem } from '../game/types';
 import { Human, loadHumanAssets, loadModel, type HumanAssets, type HumanStyle } from './humans';
-import { buildFigurine, buildUpgradeBox, registerModelFigurine, type Figurine } from './items3d';
+import { buildFigurine, buildUpgradeBox, goldify, registerModelFigurine, type Figurine } from './items3d';
 import {
-  DOOR, FIELD_RECTS, fieldAt, fieldCenter, itemSlot, KASSE, KASSE_SPOT, LAYOUT_BOUNDS, OBSTACLES, PHONE, PHONE_SPOT, ROOM,
-  TABLE, TABLE_LAYOUT, TABLE_SPOT, TABLE_WHEEL, VITRINE, VITRINE_SPOT,
+  DOOR, FIELD_RECTS, fieldAt, fieldCenter, itemSlot, KASSE, KASSE_SPOT, LAYOUT_BOUNDS, OBSTACLES, PHONE, PHONE_SPOT, RIVAL_SPOT, ROOM,
+  SMOKES, SMOKES_SPOT, TABLE, TABLE_LAYOUT, TABLE_SPOT, TABLE_WHEEL, VITRINE, VITRINE_SPOT,
 } from './layout';
 import { feltNormal, leather, smudges, wood } from './materials';
 import { buildCasino, smoke, type Casino } from './room';
@@ -35,7 +35,7 @@ interface Tween {
   done?: () => void;
 }
 
-export type CameraMode = 'menu' | 'room' | 'table' | 'wheel' | 'kasse' | 'vitrine' | 'phone' | 'caught';
+export type CameraMode = 'menu' | 'room' | 'table' | 'wheel' | 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'shark' | 'caught';
 
 interface PlacedItem {
   uid: number;
@@ -43,6 +43,7 @@ interface PlacedItem {
   fig: Figurine;
   holder: THREE.Group;
   jump: number;
+  gold: boolean;
 }
 
 export type Quality = 'high' | 'low';
@@ -60,6 +61,11 @@ export class World {
   cashier!: Human;
   thugs: Human[] = [];
   guests: Human[] = [];
+  private rival!: Human;
+  private rivalChips: THREE.Mesh[] = [];
+  private rivalState: 'away' | 'coming' | 'here' | 'leaving' = 'away';
+  private shark!: Human;
+  private sharkState: 'away' | 'coming' | 'here' | 'leaving' = 'away';
   private people: Human[] = [];
   private casino!: Casino;
   private humanAssets!: HumanAssets;
@@ -220,6 +226,10 @@ export class World {
       t.group.visible = false;
       this.thugs.push(t);
     }
+    this.rival = this.human({ kind: 'man', top: 0x3a1a4a, bottom: 0x1a1020, hat: false, beard: true, scale: 0.98 });
+    this.rival.group.visible = false;
+    this.shark = this.human({ kind: 'man', top: 0xe8e2d6, bottom: 0xe8e2d6, shoes: 0xf0ece4, hat: true, sunglasses: true, beard: false, scale: 1.04, bulk: 1.12 });
+    this.shark.group.visible = false;
     const tints = [0x4a4238, 0x2e2a44];
     this.casino.guestSpots.forEach((spot, i) => {
       const g = this.human({ kind: 'man', top: tints[i % 2], bottom: 0x2a2622, hat: i === 1 });
@@ -441,6 +451,10 @@ export class World {
     return this.distTo(PHONE_SPOT) < 1.1;
   }
 
+  nearSmokes(): boolean {
+    return this.distTo(SMOKES_SPOT) < 1.0;
+  }
+
   /** Puts the player at the table (hidden, first-person) or back into the room. */
   standAtTable(atTable: boolean): void {
     const p = this.player.group.position;
@@ -452,8 +466,8 @@ export class World {
     this.velocity.set(0, 0, 0);
   }
 
-  standAt(where: 'kasse' | 'vitrine' | 'phone'): void {
-    const spot = where === 'kasse' ? KASSE_SPOT : where === 'vitrine' ? VITRINE_SPOT : PHONE_SPOT;
+  standAt(where: 'kasse' | 'vitrine' | 'phone' | 'smokes'): void {
+    const spot = where === 'kasse' ? KASSE_SPOT : where === 'vitrine' ? VITRINE_SPOT : where === 'smokes' ? SMOKES_SPOT : PHONE_SPOT;
     this.player.group.position.set(spot.x, 0, spot.z);
     this.player.heading = where === 'kasse' ? Math.PI : where === 'vitrine' ? -Math.PI / 2 : Math.PI / 2;
     this.player.group.visible = true;
@@ -649,15 +663,20 @@ export class World {
     const next: PlacedItem[] = [];
     for (const it of items) {
       let p = keep.get(it.uid);
+      if (p && p.gold !== !!it.gold) {
+        this.tableGroup.remove(p.holder);
+        p = undefined;
+      }
       if (!p) {
         const fig = buildFigurine(it.def);
+        if (it.gold) goldify(fig);
         const holder = new THREE.Group();
         holder.add(fig.group);
         holder.userData.itemUid = it.uid;
         this.tableGroup.add(holder);
-        p = { uid: it.uid, def: it.def, fig, holder, jump: 1 };
+        p = { uid: it.uid, def: it.def, fig, holder, jump: 1, gold: !!it.gold };
         const s = itemSlot(next.length, slots);
-        this.burst(this.tableGroup.localToWorld(new THREE.Vector3(s.x, 0.05, s.z)), 0xffd76a, 20, 0.02);
+        this.burst(this.tableGroup.localToWorld(new THREE.Vector3(s.x, 0.05, s.z)), 0xffd76a, it.gold ? 50 : 20, 0.02);
       }
       keep.delete(it.uid);
       next.push(p);
@@ -764,7 +783,7 @@ export class World {
     g.fillText('$' + debt.toLocaleString('de-DE'), 128, 76);
     g.font = '700 24px monospace';
     g.fillStyle = '#ff7a5a';
-    g.fillText(rounds ? `RUNDE ${Math.min(round, rounds)}/${rounds}` : '', 128, 116);
+    g.fillText(rounds ? `DREH ${Math.min(round, rounds)}/${rounds}` : '', 128, 116);
     g.fillStyle = '#3a2a1a';
     g.fillRect(20, 140, 216, 3);
     history.slice(0, 8).forEach((h, i) => {
@@ -775,6 +794,104 @@ export class World {
       g.fillText(String(h.n), x, y);
     });
     this.marqueeTex.needsUpdate = true;
+  }
+
+  // ---- Rival, loan shark and the ball ------------------------------------------------
+
+  /** A regular walks up to the table's end and puts his chips on `fieldId`; undefined sends him away. */
+  setRival(duel?: { fieldId: string; stake: number }): void {
+    for (const m of this.rivalChips) this.layout.remove(m);
+    this.rivalChips = [];
+    if (!duel) {
+      if (this.rivalState !== 'away') this.rivalState = 'leaving';
+      return;
+    }
+    if (this.rivalState === 'away' || this.rivalState === 'leaving') {
+      this.rivalState = 'coming';
+      this.rival.group.visible = true;
+      this.rival.group.position.set(DOOR.x + 0.3, 0, DOOR.z + 0.5);
+    }
+    // His chips: a violet stack with a gold rim so they are never mistaken for yours.
+    const c = fieldCenter(duel.fieldId);
+    const n = Math.max(2, Math.min(8, Math.round(Math.log2(duel.stake + 1))));
+    const side = new THREE.MeshPhysicalMaterial({ color: 0x5a1a8a, roughness: 0.4, clearcoat: 0.6 });
+    const face = new THREE.MeshPhysicalMaterial({ map: chipTexture(500), color: 0xd8b8ff, roughness: 0.4, clearcoat: 0.6 });
+    for (let i = 0; i < n; i++) {
+      const m = new THREE.Mesh(this.chipGeo, [side, face, face]);
+      m.position.set(c.x + 0.028, CHIP_H / 2 + i * CHIP_H, c.z - 0.024);
+      m.rotation.y = i * 0.7;
+      m.castShadow = true;
+      this.layout.add(m);
+      this.rivalChips.push(m);
+    }
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(CHIP_R + 0.003, 0.0015, 6, 32), new THREE.MeshBasicMaterial({ color: 0xc9a0ff, toneMapped: false }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(c.x + 0.028, 0.002, c.z - 0.024);
+    this.layout.add(ring);
+    this.rivalChips.push(ring);
+  }
+
+  /** The rival reacts to the duel's outcome. */
+  rivalReact(won: boolean): void {
+    this.rival.play(won ? 'agree' : 'headShake');
+  }
+
+  summonShark(): void {
+    this.sharkState = 'coming';
+    this.shark.group.visible = true;
+    this.shark.group.position.set(DOOR.x, 0, DOOR.z + 0.3);
+    this.distort(0.8);
+  }
+
+  dismissShark(): void {
+    if (this.sharkState !== 'away') this.sharkState = 'leaving';
+  }
+
+  /** Swaps the look of the roulette ball. */
+  setBall(id: string): void {
+    const b = BALLS[id] ?? BALLS.stahl;
+    const m = this.wheel.ball.material as THREE.MeshPhysicalMaterial;
+    m.color.setHex(b.color);
+    m.metalness = b.metal;
+    m.roughness = b.rough;
+    m.transmission = b.clear ? 0.9 : 0;
+    m.thickness = b.clear ? 0.3 : 0;
+    m.ior = 1.5;
+    m.needsUpdate = true;
+  }
+
+  /** The croupier nods when he takes a bribe. */
+  croupierNod(): void {
+    this.croupier.play('agree');
+  }
+
+  private updateVisitors(dt: number): void {
+    const p = this.player.group.position;
+    const r = this.rival;
+    if (this.rivalState === 'coming' || this.rivalState === 'here') {
+      if (r.walkTo(RIVAL_SPOT.x, RIVAL_SPOT.z, dt, 1.2)) {
+        this.rivalState = 'here';
+        r.face(TABLE.x + TABLE_LAYOUT.x - RIVAL_SPOT.x, TABLE.z - RIVAL_SPOT.z, dt, 4);
+      }
+    } else if (this.rivalState === 'leaving') {
+      if (r.walkTo(DOOR.x + 0.3, DOOR.z + 0.2, dt, 1.4)) {
+        r.group.visible = false;
+        this.rivalState = 'away';
+      }
+    }
+    const sh = this.shark;
+    if (this.sharkState === 'coming' || this.sharkState === 'here') {
+      const tx = p.x + 0.9, tz = p.z + 0.7;
+      if (sh.walkTo(tx, tz, dt, 1.3) || this.sharkState === 'here') {
+        this.sharkState = 'here';
+        sh.face(p.x - sh.group.position.x, p.z - sh.group.position.z, dt, 4);
+      }
+    } else if (this.sharkState === 'leaving') {
+      if (sh.walkTo(DOOR.x, DOOR.z + 0.2, dt, 1.5)) {
+        sh.group.visible = false;
+        this.sharkState = 'away';
+      }
+    }
   }
 
   // ---- Debt collectors ------------------------------------------------------------
@@ -907,6 +1024,7 @@ export class World {
     }
     for (const p of this.placedItems) {
       p.fig.animate?.(this.time);
+      if (p.gold && Math.random() < dt * 3) this.burst(p.holder.localToWorld(new THREE.Vector3((Math.random() - 0.5) * 0.05, p.fig.height * Math.random() + 0.01, (Math.random() - 0.5) * 0.05)), 0xffe08a, 1, 0.004);
       p.jump = Math.max(0, p.jump - dt * 2.5);
       const k = Math.sin(p.jump * Math.PI);
       p.fig.group.position.y = k * 0.04;
@@ -949,6 +1067,7 @@ export class World {
     const kp = this.cashier.group.position;
     this.cashier.face(pp.x - kp.x, pp.z - kp.z, dt, 2);
     this.updateThugs(dt);
+    this.updateVisitors(dt);
     for (const g of this.guests) if (Math.random() < dt * 0.05) g.play('agree');
     for (const h of this.people) h.update(dt);
 
@@ -997,8 +1116,12 @@ export class World {
       case 'table': {
         const aspect = this.camera.aspect;
         const back = aspect < 1.5 ? 1 + (1.5 - aspect) * 1.1 : 1;
-        pos.set(L.x, L.y + 1.15 * back, L.z + 0.74 * back);
-        look.set(L.x, L.y, L.z + 0.02 * back);
+        // Leave room on the right for the bet slip on wide screens.
+        const slip = window.innerWidth > 1050 ? 1 : 0;
+        const zoom = back * (1 + 0.36 * slip);
+        const dx = 0.42 * slip;
+        pos.set(L.x + dx, L.y + 1.15 * zoom, L.z + 0.74 * zoom);
+        look.set(L.x + dx, L.y, L.z + 0.02 * zoom);
         rate = 5;
         break;
       }
@@ -1021,6 +1144,17 @@ export class World {
         pos.set(PHONE.x - 1.6, 1.7, PHONE.z + 0.9);
         look.set(PHONE.x, PHONE.y, PHONE.z);
         break;
+      case 'smokes':
+        pos.set(SMOKES.x - 2.0, 1.6, SMOKES.z + 0.9);
+        look.set(SMOKES.x, 1.15, SMOKES.z);
+        break;
+      case 'shark': {
+        const sp = this.shark.group.position;
+        pos.set((p.x + sp.x) / 2 - 0.6, 1.75, Math.max(p.z, sp.z) + 2.2);
+        look.set((p.x + sp.x) / 2, 1.3, (p.z + sp.z) / 2);
+        rate = 2.5;
+        break;
+      }
       case 'caught':
         pos.set(p.x + 1.4, 1.75, p.z + 2.4);
         look.set(p.x, 1.25, p.z);
@@ -1051,8 +1185,14 @@ export class World {
     }
   }
 
+  /** Pushes the TV headline. */
+  setNews(headline: string): void {
+    this.casino.setNews(headline);
+  }
+
   /** Chip colour for UI swatches. */
   static chipColor(v: number): string {
     return CHIP_COLORS[v]?.face ?? '#eee';
   }
 }
+

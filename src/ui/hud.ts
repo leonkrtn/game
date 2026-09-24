@@ -1,4 +1,4 @@
-import { CHIP_COLORS, chipLabel, DENOMINATIONS, DEBTS, ITEMS, POCKET_MOD_INFO, RARITY, RULES, STAGES } from '../game/content';
+import { CHIP_COLORS, chipLabel, CONSUMABLES, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_MOD_INFO, RARITY, RULES, SETS, STAGES } from '../game/content';
 import { FIELD_BY_ID, fieldWins, KIND_NAME } from '../game/fields';
 import type { Run } from '../game/run';
 import type { Line } from '../game/scoring';
@@ -16,10 +16,21 @@ export function chipFace(value: number): HTMLElement {
   return e;
 }
 
-export function itemDesc(t: ItemInstance): string {
+export function itemDesc(t: Pick<ItemInstance, 'def' | 'counter' | 'gold'>): string {
   const d = ITEMS[t.def];
-  const step = t.def === 'glocke' ? 0.2 : t.def === 'rabe' ? 0.5 : 0;
-  return d.desc.replace('{n}', fmtMult(t.counter * step));
+  const step = (t.def === 'glocke' ? 0.2 : t.def === 'rabe' ? 0.5 : 0) * (t.gold ? 2 : 1);
+  return ((t.gold && GOLD_DESC[t.def]) || d.desc).replace('{n}', fmtMult(t.counter * step));
+}
+
+/** Name with a star for golden talismans. */
+export const itemName = (t: Pick<ItemInstance, 'def' | 'gold'>) => (t.gold ? '★ ' : '') + ITEMS[t.def].name;
+
+/** Which set a talisman belongs to, with how many of its parts stand on the table. */
+export function setInfo(run: Run, def: string): string {
+  const set = SETS.find((x) => x.items.includes(def));
+  if (!set) return '';
+  const have = set.items.filter((d) => run.has(d)).length;
+  return `SET „${set.name}" ${have}/3: ${set.desc}`;
 }
 
 export const rarityClass = (def: string) => `rar-${ITEMS[def].rarity}`;
@@ -66,10 +77,11 @@ export function renderOsd(run: Run, cash: number, tape: number): void {
   const rateNo = run.endless ? `RATE ${run.cycle + 1}` : `RATE ${run.cycle + 1}/${DEBTS.length}`;
   const left = h('div', { class: 'left' },
     h('div', { class: 'play', html: '▶ PLAY <span style="font-size:24px">SP</span>' }),
-    h('div', { class: 'line', html: `${rateNo} <span class="debt">${fmt(run.debt)}</span>  ${due ? '<span class="warn">JETZT FÄLLIG</span>' : run.roundsLeft === 0 ? 'ALLE RUNDEN GESPIELT' : `RUNDE ${run.round}/${run.cycleRounds}`}` }),
+    h('div', { class: 'line', html: `${rateNo} <span class="debt">${fmt(run.debt)}</span>  ${due ? '<span class="warn">JETZT FÄLLIG</span>' : run.roundsLeft === 0 ? 'ALLE DREHS GESPIELT' : `DREH ${run.round}/${run.cycleRounds}`}` }),
     h('div', { class: 'line', html: `KASSE <span class="debt">${fmt(run.deposit)}</span>  ${covered ? '<span class="money">GEDECKT</span>' : `FEHLT ${fmt(run.debt - run.deposit - run.cash)}`}` }),
     h('div', { class: 'line', html: `BARGELD <span class="money">${fmt(cash)}</span>${run.stakeTotal ? `  IM SPIEL ${fmt(run.stakeTotal)}` : ''}` }),
     h('div', { class: 'line', html: `<span class="marks">◆${run.marks}</span>  <span class="luck">GLÜCK ${run.luck}</span>  ZINS ${pct(run.interestRate)}  TALISMANE ${run.items.length}/${run.perks.slots}` }),
+    run.news ? h('div', { class: 'line news', html: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }) : null,
     h('div', {
       class: 'rule',
       html: run.rule
@@ -142,6 +154,9 @@ export interface TableHandlers {
   clear(): void;
   leave(): void;
   wheel(): void;
+  bribe(): void;
+  risk(): void;
+  smoke(i: number): void;
 }
 
 export function renderTableBar(run: Run, selected: number, hd: TableHandlers, busy: boolean): void {
@@ -160,6 +175,89 @@ export function renderTableBar(run: Run, selected: number, hd: TableHandlers, bu
     h('button', { onclick: hd.wheel, disabled: busy, html: '<kbd>V</kbd> RAD' }),
     h('button', { onclick: hd.leave, disabled: busy, html: '<kbd>ESC</kbd> AUFSTEHEN' }),
   );
+  const extra = h('div', { class: 'extra' },
+    h('button', {
+      onclick: hd.bribe, disabled: busy || run.bribed || run.cash < run.bribePrice,
+      class: run.bribed ? 'on' : '',
+      html: run.bribed ? '<kbd>B</kbd> CROUPIER BESTOCHEN' : `<kbd>B</kbd> BESTECHEN ${fmt(run.bribePrice)} · RISIKO ${pct(run.bribeRisk)}`,
+    }),
+    run.roundsLeft === 1 ? h('button', {
+      onclick: hd.risk, disabled: busy || !run.canHighRisk, class: run.highRisk ? 'on risk' : 'risk',
+      html: run.highRisk ? '<kbd>H</kbd> HOCHRISIKO AN · ×2 MULT' : `<kbd>H</kbd> HOCHRISIKO: EINSATZ VERDOPPELN, ×2 MULT`,
+    }) : null,
+    ...run.smokes.map((id, i) => h('button', { onclick: () => hd.smoke(i), disabled: busy, title: CONSUMABLES[id].desc, html: `<kbd>${7 + i}</kbd> ${CONSUMABLES[id].name.toUpperCase()}` })),
+  );
+  $('actions').append(extra);
+}
+
+/** Active one-shot effects for the next spin, as short labels. */
+export function boostLabels(run: Run): string[] {
+  const b = run.boost;
+  const out: string[] = [];
+  if (b.luck) out.push(`GLÜCK +${b.luck}`);
+  if (b.gezinkt) out.push('GEZINKTE KUGEL');
+  if (b.kreide) out.push('KREIDE AUF PLEINS');
+  if (b.kaugummi) out.push('KAUGUMMI');
+  if (b.korn) out.push('DOPPELKORN +2 MULT');
+  if (run.bribed) out.push('CROUPIER BESTOCHEN');
+  if (run.highRisk) out.push('HOCHRISIKO ×2');
+  return out;
+}
+
+/** The bet slip next to the table: every bet with payout, chance and what it would bring. */
+export function renderSlip(run: Run, show: boolean): void {
+  const box = $('slip');
+  if (!show) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  const rows: HTMLElement[] = [h('div', { class: 'title', text: `WETTSCHEIN · DREH ${run.round}/${run.cycleRounds}` })];
+  const bets = Object.entries(run.bets);
+  const ch = run.chances();
+  if (!bets.length) {
+    rows.push(h('div', { class: 'hint', text: 'Klick aufs Feld setzt den gewählten Jeton. Auch Linien und Ecken zwischen Zahlen sind Wetten (Cheval, Carré …).' }));
+  }
+  for (const [fid, stack] of bets) {
+    const f = FIELD_BY_ID[fid];
+    const stake = stack.reduce((a, b) => a + b, 0);
+    const payout = f.kind === 'straight' && run.activeRule === 'halbzahl' ? 18 : f.payout;
+    const name = f.kind === 'straight' ? `PLEIN ${f.label}` : f.numbers.length ? `${KIND_NAME[f.kind].split(' ')[0]} ${f.label}` : f.label;
+    rows.push(h('div', { class: 'bet' },
+      h('span', { class: 'n', text: name }),
+      h('span', { text: fmt(stake) }),
+      h('span', { class: 'c', text: pct(fieldChance(run, fid)) }),
+      h('span', { class: 'w', text: `→ ${fmt(stake * payout)}` }),
+    ));
+  }
+  if (bets.length) {
+    // Chance that at least one bet pays, and the best single outcome before talismans.
+    let anyWin = 0;
+    let best = 0;
+    run.wheel.forEach((p, i) => {
+      let back = 0;
+      for (const [fid, stack] of bets) {
+        const f = FIELD_BY_ID[fid];
+        if (fieldWins(f, p) && !(f.kind === 'red' && run.activeRule === 'rotfluch')) back += stack.reduce((a, b) => a + b, 0) * (f.kind === 'straight' && run.activeRule === 'halbzahl' ? 18 : f.payout);
+      }
+      if (back > 0) anyWin += ch[i];
+      best = Math.max(best, back);
+    });
+    rows.push(h('div', { class: 'sum' }, h('span', { text: `EINSATZ ${fmt(run.stakeTotal)}` }), h('span', { text: `TRIFFT ${pct(anyWin)}` })));
+    rows.push(h('div', { class: 'hint', text: `Bester Fall ohne Talismane: ${fmt(best)} zurück. Talismane erhöhen den Mult – der Gewinn ist Summe × Mult.` }));
+  }
+  const boosts = boostLabels(run);
+  if (boosts.length) rows.push(h('div', { class: 'boost', text: 'AKTIV: ' + boosts.join(' · ') }));
+  if (run.duel) {
+    const f = FIELD_BY_ID[run.duel.fieldId];
+    rows.push(h('div', { class: 'duel', text: `DUELL: ${run.duel.name.toUpperCase()} SETZT ${fmt(run.duel.stake)} AUF ${f.label.toUpperCase()}. GEWINN MEHR ALS ER: +◆3 UND SEIN EINSATZ. SONST RATE +15 %.` }));
+  }
+  rows.push(h('div', { class: 'title small', text: `TALISMANE ${run.items.length}/${run.perks.slots} · GLÜCK ${run.luck} = ${pct(run.hopChance)} NACHHOPSER` }));
+  if (!run.items.length) rows.push(h('div', { class: 'hint', text: 'Noch keine. Die Vitrine verkauft sie gegen Glücksmarken.' }));
+  for (const t of run.items) {
+    rows.push(h('div', { class: 'item' }, h('span', { class: 'n ' + rarityClass(t.def), text: itemName(t) }), h('span', { class: 'd', text: itemDesc(t) })));
+  }
+  box.replaceChildren(...rows);
 }
 
 export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number, y: number): void {

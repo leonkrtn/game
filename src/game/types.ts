@@ -32,6 +32,8 @@ export interface ItemInstance {
   def: string;
   /** Scaling counter for items that grow during a run. */
   counter: number;
+  /** Fused with a second copy: stronger effect. */
+  gold?: boolean;
 }
 
 export type ShopItemKind = 'item' | 'pocket';
@@ -42,4 +44,6 @@ export interface ShopItem {
   /** Price in lucky marks. */
   price: number;
   sold?: boolean;
+  /** Buying it turns the owned copy golden. */
+  fuse?: boolean;
 }

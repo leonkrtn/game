@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import { DOOR, KASSE, PHONE, ROOM, TABLE, VITRINE } from './layout';
+import { DOOR, KASSE, PHONE, ROOM, SMOKES, TABLE, VITRINE } from './layout';
 import { carpet, ceiling, damask, marble, smudges, wood, woodBump } from './materials';
 
 /** Handles to the parts of the room that animate or that the game talks to. */
@@ -11,6 +11,8 @@ export interface Casino {
   phoneHandset: THREE.Group;
   phoneLamp: THREE.MeshStandardMaterial;
   phoneLight: THREE.PointLight;
+  /** Shows a headline in the late-night news on the TV. */
+  setNews(headline: string): void;
   /** Where background guests stand, facing the slot machines. */
   guestSpots: { x: number; z: number; heading: number }[];
   /** Objects that fade out when they block the view onto the player. */
@@ -70,6 +72,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   const H = ROOM.height;
   const updates: ((dt: number, t: number) => void)[] = [];
   const occluders: THREE.Mesh[] = [];
+  let newsText = 'CASINO RIEN NE VA PLUS · GEÖFFNET BIS 4 UHR';
 
   // ---- Materials -----------------------------------------------------------
   const carpetS = carpet([W / 1.6, D / 1.6]);
@@ -155,7 +158,9 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     spot.shadow.normalBias = 0.02;
     spot.shadow.camera.near = 0.8;
     scene.add(spot, spot.target);
+    lightCone(scene, updates, TABLE.x + x, 2.42, TABLE.z, 0.16, 0.85, 1.55, 0xffd6a0, 0.1);
   }
+  dust(scene, updates, TABLE.x, TABLE.z, 2.4, 0.7, 1.1, 2.3);
 
   const lamp = (x: number, z: number, intensity: number, color = 0xffc890, shadow = false) => {
     const ring = mesh(new THREE.CylinderGeometry(0.22, 0.26, 0.05, 24), brass, x, H - 0.03, z, false);
@@ -170,6 +175,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
       spot.shadow.bias = -0.0003;
     }
     scene.add(ring, bulb, spot, spot.target);
+    lightCone(scene, updates, x, H - 0.08, z, 0.17, 0.95, 2.2, color, 0.05);
     return spot;
   };
   lamp(KASSE.x, KASSE.z + 0.8, 16);
@@ -482,45 +488,132 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     tvTex.colorSpace = THREE.SRGBColorSpace;
     const screen = mesh(new THREE.PlaneGeometry(0.44, 0.33), new THREE.MeshBasicMaterial({ map: tvTex, toneMapped: false }), -0.04, 0.88, 0.245, false);
     g.add(screen);
-    const tvLight = new THREE.PointLight(0x9ab8ff, 1.2, 2.2, 2);
+    const tvLight = new THREE.PointLight(0x6a8aff, 1.2, 2.6, 2);
     tvLight.position.set(0, 0.9, 0.6);
     g.add(tvLight);
     let tv = 0;
     let frame = 0;
+    let scroll = 0;
     updates.push((dt) => {
       tv -= dt;
+      scroll += dt * 34;
       if (tv > 0) return;
       tv = 1 / 12;
       frame++;
-      const img = cg.createImageData(160, 120);
-      const race = Math.floor(frame / 60) % 3 !== 2;
-      for (let i = 0; i < img.data.length; i += 4) {
-        const n = Math.random() * 255;
-        if (race) {
-          const y = Math.floor(i / 4 / 160);
-          const base = y < 50 ? [60, 90, 150] : [40, 110, 40];
-          img.data[i] = base[0] + n * 0.15;
-          img.data[i + 1] = base[1] + n * 0.15;
-          img.data[i + 2] = base[2] + n * 0.15;
-        } else {
+      // Late-night news: a studio shot with a ticker, and a burst of static between items.
+      const staticNow = frame % 150 > 142;
+      if (staticNow) {
+        const img = cg.createImageData(160, 120);
+        for (let i = 0; i < img.data.length; i += 4) {
+          const n = Math.random() * 255;
           img.data[i] = img.data[i + 1] = img.data[i + 2] = n;
+          img.data[i + 3] = 255;
         }
-        img.data[i + 3] = 255;
-      }
-      cg.putImageData(img, 0, 0);
-      if (race) {
-        for (let k = 0; k < 4; k++) {
-          const x = ((frame * (1.5 + k * 0.3)) % 200) - 20;
-          cg.fillStyle = ['#3a2010', '#101010', '#6a4020', '#e0d0b0'][k];
-          cg.fillRect(x, 58 + k * 12, 18, 9);
-          cg.fillRect(x + 14, 54 + k * 12, 6, 6);
+        cg.putImageData(img, 0, 0);
+      } else {
+        const grad = cg.createLinearGradient(0, 0, 0, 120);
+        grad.addColorStop(0, '#0c2a6a');
+        grad.addColorStop(1, '#040c24');
+        cg.fillStyle = grad;
+        cg.fillRect(0, 0, 160, 120);
+        // Map of the world behind the anchor, as a grid of dots.
+        cg.fillStyle = 'rgba(120,170,255,0.25)';
+        for (let y = 14; y < 70; y += 5) for (let x = 70; x < 156; x += 5) if (Math.sin(x * 0.21 + y * 0.13) + Math.cos(y * 0.3) > 0.4) cg.fillRect(x, y, 2, 2);
+        // The anchor: shoulders and a head (the tape blurs the face anyway).
+        cg.fillStyle = '#1a1a22';
+        cg.beginPath();
+        cg.ellipse(46, 96, 30, 26, 0, Math.PI, 0);
+        cg.fill();
+        cg.fillStyle = '#c89a7a';
+        cg.beginPath();
+        cg.ellipse(46, 56 + Math.sin(frame * 0.4) * 0.6, 11, 14, 0, 0, Math.PI * 2);
+        cg.fill();
+        for (let by = 50; by < 64; by += 4) for (let bx = 36; bx < 58; bx += 4) {
+          cg.fillStyle = `hsl(20,35%,${45 + Math.random() * 20}%)`;
+          cg.fillRect(bx, by, 4, 4);
         }
-        cg.fillStyle = '#fff';
-        cg.font = '700 11px monospace';
-        cg.fillText('RENNEN 4 · LIVE', 6, 14);
+        cg.fillStyle = '#e8e0d0';
+        cg.fillRect(40, 72, 12, 16);
+        cg.fillStyle = '#8a0a18';
+        cg.fillRect(44, 72, 4, 14);
+        // Logo and ticker.
+        cg.fillStyle = '#ffcf3a';
+        cg.fillRect(4, 4, 58, 11);
+        cg.fillStyle = '#0a0a14';
+        cg.font = '700 9px monospace';
+        cg.fillText('NACHT-JOURNAL', 6, 12);
+        cg.fillStyle = '#c8102c';
+        cg.fillRect(0, 100, 160, 20);
+        cg.fillStyle = '#ffffff';
+        cg.font = '700 13px monospace';
+        const text = `+++ ${newsText} +++ ${newsText} `;
+        const w = cg.measureText(text).width / 2;
+        cg.fillText(text, 160 - (scroll % (w + 160)), 115);
       }
       tvTex.needsUpdate = true;
-      tvLight.intensity = race ? 1.0 : 1.4 + Math.random() * 0.4;
+      tvLight.intensity = staticNow ? 1.6 : 1.1;
+    });
+    scene.add(g);
+  }
+
+  // ---- Cigarette machine ----------------------------------------------------------------
+  {
+    const S = SMOKES;
+    const g = new THREE.Group();
+    g.position.set(S.x, 0, S.z);
+    g.rotation.y = -Math.PI / 2;
+    const body = phys({ color: 0x7a0a10, roughness: 0.35, metalness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.25 });
+    g.add(mesh(new RoundedBoxGeometry(S.halfD * 2, 1.82, S.halfW * 2 + 0.1, 3, 0.03), body, 0, 0.91, 0));
+    // Glass front with rows of cigarette packs.
+    const packColors = ['#f4f0e8', '#c8102c', '#1a3a8a', '#e8c040', '#2a6a3a', '#101014', '#d8d0c0', '#8a1a4a'];
+    const packs = document.createElement('canvas');
+    packs.width = 256;
+    packs.height = 320;
+    const pg = packs.getContext('2d')!;
+    pg.fillStyle = '#1a1210';
+    pg.fillRect(0, 0, 256, 320);
+    for (let row = 0; row < 4; row++) {
+      for (let col = 0; col < 6; col++) {
+        const x = 8 + col * 41, y = 10 + row * 78;
+        const c = packColors[(row * 3 + col * 5) % packColors.length];
+        pg.fillStyle = c;
+        pg.fillRect(x, y, 34, 52);
+        pg.fillStyle = c === '#101014' ? '#c9a04a' : c === '#f4f0e8' || c === '#d8d0c0' ? '#c8102c' : '#f4f0e8';
+        pg.fillRect(x, y + 14, 34, 8);
+        pg.beginPath();
+        pg.arc(x + 17, y + 36, 7, 0, Math.PI * 2);
+        pg.fill();
+        pg.fillStyle = '#c9a04a';
+        pg.font = '700 13px monospace';
+        pg.fillText(`${3 + ((row + col) % 3)},-`, x + 3, y + 70);
+      }
+    }
+    const packTex = new THREE.CanvasTexture(packs);
+    packTex.colorSpace = THREE.SRGBColorSpace;
+    const front = mesh(new THREE.PlaneGeometry(0.62, 0.78), new THREE.MeshStandardMaterial({ map: packTex, emissive: 0xffffff, emissiveMap: packTex, emissiveIntensity: 0.28, roughness: 0.6 }), 0, 1.25, S.halfW + 0.051, false);
+    const glassPane = mesh(new THREE.PlaneGeometry(0.64, 0.8), phys({ color: 0xffffff, transparent: true, opacity: 0.12, roughness: 0.02 }), 0, 1.25, S.halfW + 0.065, false);
+    g.add(front, glassPane);
+    // Pull knobs under the packs.
+    for (let i = 0; i < 6; i++) {
+      const knob = mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.05, 12), chrome, -0.26 + i * 0.104, 0.78, S.halfW + 0.075);
+      knob.rotation.x = Math.PI / 2;
+      g.add(knob);
+      g.add(mesh(new THREE.BoxGeometry(0.07, 0.025, 0.005), std({ color: 0xf0e8d0, roughness: 0.5 }), -0.26 + i * 0.104, 0.83, S.halfW + 0.052, false));
+    }
+    g.add(mesh(new THREE.BoxGeometry(0.5, 0.12, 0.06), chrome, 0, 0.42, S.halfW + 0.06));
+    g.add(mesh(new THREE.BoxGeometry(0.06, 0.1, 0.02), std({ color: 0x111111, roughness: 0.4 }), 0.22, 0.62, S.halfW + 0.058));
+    const sign = mesh(new THREE.PlaneGeometry(0.66, 0.16), new THREE.MeshBasicMaterial({ map: textTexture('ZIGARETTEN', 512, 128, '700 80px Arial Narrow, Arial, sans-serif', '#fff4d8', '#ff5a2a', '#5a0608'), toneMapped: false }), 0, 1.72, S.halfW + 0.052, false);
+    g.add(sign);
+    const glow = new THREE.PointLight(0xffb070, 0.8, 2.4, 2);
+    glow.position.set(0, 1.1, 1.0);
+    g.add(glow);
+    let hum = 0;
+    updates.push((dt) => {
+      hum -= dt;
+      if (hum < -0.15) hum = 3 + Math.random() * 7;
+      const on = hum > 0 || Math.random() > 0.5;
+      glow.intensity = on ? 0.8 : 0.2;
+      (front.material as THREE.MeshStandardMaterial).emissiveIntensity = on ? 0.28 : 0.08;
     });
     scene.add(g);
   }
@@ -568,6 +661,9 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
 
   return {
     update: (dt, t) => updates.forEach((u) => u(dt, t)),
+    setNews: (headline) => {
+      newsText = headline;
+    },
     showcase,
     phoneHandset,
     phoneLamp,
@@ -657,5 +753,83 @@ function haze(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[]):
       s.position.x = b.x + Math.sin(t * 0.05 + i) * 0.6;
       s.position.z = b.z + Math.cos(t * 0.04 + i * 1.7) * 0.4;
     });
+  });
+}
+
+/**
+ * A soft shaft of light in the smoky air below a lamp: an open cone, brightest at the top,
+ * fading towards the floor and at its silhouette edges.
+ */
+function lightCone(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[], x: number, top: number, z: number, rTop: number, rBottom: number, h: number, color: number, strength: number): void {
+  const geo = new THREE.CylinderGeometry(rTop, rBottom, h, 40, 8, true);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { color: { value: new THREE.Color(color) }, strength: { value: strength }, time: { value: 0 }, height: { value: h } },
+    vertexShader: /* glsl */ `
+      varying float vH;
+      varying vec3 vN;
+      varying vec3 vView;
+      varying vec3 vWorld;
+      uniform float height;
+      void main() {
+        vH = 0.5 - position.y / height;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        vN = normalize(mat3(modelMatrix) * normal);
+        vView = normalize(cameraPosition - wp.xyz);
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      varying float vH;
+      varying vec3 vN;
+      varying vec3 vView;
+      varying vec3 vWorld;
+      uniform vec3 color;
+      uniform float strength;
+      uniform float time;
+      void main() {
+        float edge = pow(abs(dot(vN, vView)), 2.0);
+        float fall = pow(1.0 - clamp(vH, 0.0, 1.0), 1.6) * smoothstep(0.0, 0.08, vH);
+        float drift = 0.75 + 0.25 * sin(vWorld.y * 3.0 + vWorld.x * 2.0 + time * 0.4) * sin(vWorld.z * 2.5 - time * 0.3);
+        gl_FragColor = vec4(color * strength * edge * fall * drift, 1.0);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  const cone = new THREE.Mesh(geo, mat);
+  cone.position.set(x, top - h / 2, z);
+  cone.renderOrder = 5;
+  scene.add(cone);
+  updates.push((_dt, t) => (mat.uniforms.time.value = t));
+}
+
+/** Dust and smoke particles glittering in a lamp's light. */
+function dust(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[], cx: number, cz: number, halfW: number, halfD: number, y0: number, y1: number): void {
+  smokeTex ??= smokeTexture();
+  const n = 260;
+  const base = new Float32Array(n * 3);
+  const pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    base[i * 3] = cx + (Math.random() * 2 - 1) * halfW;
+    base[i * 3 + 1] = y0 + Math.random() * (y1 - y0);
+    base[i * 3 + 2] = cz + (Math.random() * 2 - 1) * halfD;
+  }
+  pos.set(base);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const mat = new THREE.PointsMaterial({ map: smokeTex, color: 0xffe2b8, size: 0.012, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending });
+  const points = new THREE.Points(geo, mat);
+  scene.add(points);
+  updates.push((_dt, t) => {
+    for (let i = 0; i < n; i++) {
+      const k = i * 1.37;
+      pos[i * 3] = base[i * 3] + Math.sin(t * 0.13 + k) * 0.08;
+      pos[i * 3 + 1] = y0 + ((base[i * 3 + 1] - y0 + t * 0.012 * (0.5 + (i % 5) * 0.2)) % (y1 - y0));
+      pos[i * 3 + 2] = base[i * 3 + 2] + Math.cos(t * 0.11 + k * 0.7) * 0.06;
+    }
+    geo.attributes.position.needsUpdate = true;
   });
 }

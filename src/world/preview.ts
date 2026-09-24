@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { buildFigurine, buildUpgradeBox, type Figurine } from './items3d';
+import { buildFigurine, buildUpgradeBox, goldify, type Figurine } from './items3d';
 
 /** A small turntable that shows one talisman up close, for the showcase menu. */
 export class ItemPreview {
@@ -44,12 +44,14 @@ export class ItemPreview {
   }
 
   /** Shows an item (by id) or a wheel upgrade (kind 'pocket' with its colour). */
-  show(def: string, upgradeColor?: string): void {
-    if (def === this.current) return;
-    this.current = def;
+  show(def: string, upgradeColor?: string, gold = false): void {
+    const key = def + (gold ? ':gold' : '');
+    if (key === this.current) return;
+    this.current = key;
     this.t = 0;
     if (this.fig) this.holder.remove(this.fig.group);
     this.fig = upgradeColor ? buildUpgradeBox(upgradeColor) : buildFigurine(def);
+    if (gold && !upgradeColor) goldify(this.fig);
     this.fig.group.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) o.castShadow = true;
     });

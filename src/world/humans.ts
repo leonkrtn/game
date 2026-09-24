@@ -73,9 +73,24 @@ export async function loadHumanAssets(base: string): Promise<HumanAssets> {
   return { man, sunglasses, clips: { man: manClips } };
 }
 
+/**
+ * Recolours clothing: the texture keeps its folds and seams (its brightness), the colour comes
+ * from `color`. Plain multiplying would keep the original salmon suit's hue.
+ */
 function tintMaterial(m: THREE.MeshStandardMaterial, color: number): THREE.MeshStandardMaterial {
   const c = m.clone();
   c.color.setHex(color);
+  c.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `
+      #ifdef USE_MAP
+        vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+        float lum = dot( sampledDiffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
+        diffuseColor.rgb *= vec3( lum * 1.7 );
+        diffuseColor.a *= sampledDiffuseColor.a;
+      #endif
+    `);
+  };
+  c.customProgramCacheKey = () => 'recolor';
   return c;
 }
 

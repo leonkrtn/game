@@ -1,4 +1,4 @@
-import { ITEMS, START_KITS } from './content';
+import { BALLS, CONSUMABLES, ITEMS, START_KITS } from './content';
 import type { Run } from './run';
 
 /** Persistent progress across runs. Stored per browser. */
@@ -13,6 +13,7 @@ export interface Profile {
   /** Highest debt stage unlocked (0..5). */
   maxStage: number;
   lastStage: number;
+  lastBall: string;
 }
 
 export interface Achievement {
@@ -52,12 +53,19 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'reich2', name: 'Goldjunge', desc: 'Besitze $20.000 (Bargeld und Einzahlung).', rewards: ['goldkette'], check: (r) => r.stats.maxMoney >= 20000 },
   { id: 'stufe1', name: 'Stammkunde', desc: 'Bezahle eine Rate auf Schuldenstufe 1 oder höher.', rewards: ['zauberwuerfel'], check: (r) => r.stage >= 1 && r.paidRates >= 1 },
   { id: 'stufe3', name: 'Unantastbar', desc: 'Bezahle 4 Raten auf Schuldenstufe 3 oder höher.', rewards: ['sonnenbrille'], check: (r) => r.stage >= 3 && r.paidRates >= 4 },
+  { id: 'gold1', name: 'Goldschmied', desc: 'Mach einen Talisman golden (zweites Exemplar kaufen).', rewards: ['glas'], check: (r) => r.stats.golds >= 1 },
+  { id: 'set1', name: 'Sammler', desc: 'Stell ein komplettes Set aus drei Talismanen auf den Tisch.', rewards: ['elfenbein'], check: (r) => r.stats.maxSets >= 1 },
+  { id: 'duell', name: 'High Noon', desc: 'Gewinne ein Duell gegen einen Stammgast.', rewards: ['onyx'], check: (r) => r.stats.duelWins >= 1 },
+  { id: 'schmiergeld', name: 'Schmiergeld', desc: 'Besteche den Croupier dreimal, ohne aufzufliegen.', rewards: ['kupfer'], check: (r) => r.stats.bribesOk >= 3 },
+  { id: 'risiko', name: 'Alles oder nichts', desc: 'Gewinne einen Hochrisiko-Dreh.', rewards: ['blei'], check: (r) => r.stats.riskWins >= 1 },
+  { id: 'hai', name: 'Mit Haien schwimmen', desc: 'Nimm das Geld vom Kredithai und bezahle danach eine Rate.', rewards: ['gezinkt'], check: (r) => r.stats.sharkRepaid >= 1 },
+  { id: 'raucher', name: 'Kettenraucher', desc: 'Kauf 4 Sachen am Zigarettenautomaten in einem Spiel.', rewards: ['espresso'], check: (r) => r.stats.smokes >= 4 },
 ];
 
 const KEY = 'rien-ne-va-plus/profile/v1';
 
 export function emptyProfile(): Profile {
-  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch', maxStage: 0, lastStage: 0 };
+  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch', maxStage: 0, lastStage: 0, lastBall: 'stahl' };
 }
 
 export function loadProfile(): Profile {
@@ -108,5 +116,9 @@ export function recordRun(p: Profile, run: Run, won: boolean): void {
 }
 
 export function rewardName(id: string): string {
-  return ITEMS[id]?.name ?? (START_KITS[id] ? `Start „${START_KITS[id].name}"` : id);
+  if (ITEMS[id]) return ITEMS[id].name;
+  if (START_KITS[id]) return `Start „${START_KITS[id].name}"`;
+  if (BALLS[id]) return `Kugel „${BALLS[id].name}"`;
+  if (CONSUMABLES[id]) return `Automat: ${CONSUMABLES[id].name}`;
+  return id;
 }

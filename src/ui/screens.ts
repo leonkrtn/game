@@ -1,10 +1,13 @@
-import { DEBTS, ITEMS, OFFERS, POCKET_ITEMS, POCKET_MOD_INFO, RARITY, STAGES, START_KITS, type PocketToolId } from '../game/content';
+import {
+  BALLS, CONSUMABLES, DEBTS, GOLD_DESC, ITEMS, MAX_CONSUMABLES, NEWS, OFFERS, POCKET_ITEMS, POCKET_MOD_INFO, RARITY, RULES, SETS, SHARK_FACTOR,
+  STAGES, START_KITS, type PocketToolId,
+} from '../game/content';
 import { ACHIEVEMENTS, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
 import type { ItemPreview } from '../world/preview';
 import { fmt, h } from './dom';
-import { itemDesc, modLegend, numberPicker, pct, rarityClass, row, wheelRing } from './hud';
+import { boostLabels, itemDesc, itemName, modLegend, numberPicker, pct, rarityClass, row, setInfo, wheelRing } from './hud';
 
 function head(title: string, right = ''): HTMLElement {
   return h('div', { class: 'head' }, h('h2', { text: title }), h('span', { html: right }));
@@ -39,6 +42,7 @@ export function kasseView(run: Run, hd: KasseHandlers): HTMLElement {
       h('div', { class: 'rows' },
         label(run.endless ? `RATE ${run.cycle + 1} · ENDLOS` : `RATE ${run.cycle + 1} VON ${DEBTS.length}`),
         h('div', { class: 'stat' }, h('span', { text: 'FÄLLIG' }), h('span', { class: 'debt-c', text: fmt(run.debt) })),
+        run.debt !== run.baseDebt ? h('div', { class: 'info', text: rateReasons(run) }) : null,
         h('div', { class: 'stat' }, h('span', { text: 'EINGEZAHLT' }), h('span', { text: fmt(run.deposit) })),
         h('div', { class: 'stat' }, h('span', { text: due ? 'STATUS' : 'NOCH' }), h('span', { class: due ? 'rec-c' : '', text: due ? 'JETZT FÄLLIG' : `${run.roundsLeft} RUNDE${run.roundsLeft === 1 ? '' : 'N'}` })),
         label('AKTIONEN'),
@@ -75,14 +79,18 @@ export function vitrineView(run: Run, hd: VitrineHandlers, preview: ItemPreview)
   const name = h('div', { class: 'name' });
   const rar = h('div', {});
   const desc = h('div', { class: 'desc' });
-  const show = (kind: 'item' | 'pocket', def: string, owned?: { counter: number; uid: number }) => {
+  const show = (kind: 'item' | 'pocket', def: string, owned?: { counter: number; uid: number; gold?: boolean }) => {
     if (kind === 'item') {
       const d = ITEMS[def];
-      name.textContent = d.name;
+      const fuse = !owned && run.items.some((t) => t.def === def && !t.gold);
+      const gold = owned?.gold || fuse;
+      name.textContent = (gold ? '★ ' : '') + d.name;
       name.className = 'name ' + rarityClass(def);
-      rar.textContent = RARITY[d.rarity].name.toUpperCase() + (owned ? ' · AUF DEINEM TISCH' : '');
-      desc.textContent = owned ? itemDesc({ def, counter: owned.counter, uid: owned.uid }) : d.desc.replace(' (aktuell +{n})', '');
-      preview.show(def);
+      rar.textContent = RARITY[d.rarity].name.toUpperCase() + (owned ? ' · AUF DEINEM TISCH' : fuse ? ' · DEIN EXEMPLAR WIRD GOLDEN' : '');
+      const text = owned ? itemDesc({ def, counter: owned.counter, gold: owned.gold }) : fuse ? `GOLDEN: ${GOLD_DESC[def]} (vorher: ${d.desc})` : d.desc;
+      const set = setInfo(run, def);
+      desc.textContent = text.replace(' (aktuell +{n})', '') + (set ? `\n${set}` : '');
+      preview.show(def, undefined, !!gold);
     } else {
       const p = POCKET_ITEMS[def as PocketToolId];
       name.textContent = p.name;
@@ -96,8 +104,8 @@ export function vitrineView(run: Run, hd: VitrineHandlers, preview: ItemPreview)
   const offer = h('div', { class: 'rows' }, label('IM ANGEBOT · PREIS IN GLÜCKSMARKEN'));
   run.shop.forEach((it, i) => {
     const isItem = it.kind === 'item';
-    const n = isItem ? ITEMS[it.def].name : POCKET_ITEMS[it.def as PocketToolId].name;
-    const full = isItem && run.items.length >= run.perks.slots;
+    const n = isItem ? (it.fuse ? `★ ${ITEMS[it.def].name} → GOLDEN` : ITEMS[it.def].name) : POCKET_ITEMS[it.def as PocketToolId].name;
+    const full = isItem && !it.fuse && run.items.length >= run.perks.slots;
     const cls = isItem ? rarityClass(it.def) : '';
     const value = it.sold ? 'VERKAUFT' : full ? 'TISCH VOLL' : `<span class="price">◆${it.price}</span>`;
     offer.append(row(`<span class="${cls}">${n}</span>`, value, () => (isItem ? hd.buy(i) : hd.target(i)), {
@@ -108,9 +116,10 @@ export function vitrineView(run: Run, hd: VitrineHandlers, preview: ItemPreview)
   offer.append(row('NEU BESTÜCKEN', `<span class="price">◆${run.rerollCost}</span>`, hd.reroll, { disabled: run.marks < run.rerollCost || !run.cashierOpen }));
 
   const mine = h('div', { class: 'rows' }, label(`AUF DEINEM TISCH ${run.items.length}/${run.perks.slots} · ◀ ▶ VERSCHIEBEN, ENTER VERKAUFT`));
+  if (run.items.length) mine.append(h('div', { class: 'info', text: 'Kauf ein zweites Exemplar eines Talismans, dann wird deiner golden und stärker.' }));
   if (!run.items.length) mine.append(h('div', { class: 'info', text: 'Noch nichts. Talismane stehen auf deinem Tisch und wirken bei jedem Dreh. Die Reihenfolge zählt für den Handspiegel.' }));
   run.items.forEach((t) => {
-    mine.append(row(`<span class="${rarityClass(t.def)}">${ITEMS[t.def].name}</span>`, `VERKAUFEN +◆${run.sellPrice(t.uid)}`, () => hd.sell(t.uid), {
+    mine.append(row(`<span class="${rarityClass(t.def)}">${itemName(t)}</span>`, `VERKAUFEN +◆${run.sellPrice(t.uid)}`, () => hd.sell(t.uid), {
       onHover: () => show('item', t.def, t),
       onStep: (d) => hd.move(t.uid, d as -1 | 1),
     }));
@@ -190,7 +199,7 @@ export function wheelView(run: Run, close: () => void, upgrade?: { index: number
 // ---- Start menu, collection, controls ------------------------------------------------------------
 
 export interface StartHandlers {
-  start(kit: string, stage: number): void;
+  start(kit: string, stage: number, ball: string): void;
   collection(): void;
   controls(): void;
   toggleSound(): boolean;
@@ -199,6 +208,9 @@ export interface StartHandlers {
 export function startView(profile: Profile, locked: Set<string>, hd: StartHandlers, soundOn: boolean): HTMLElement {
   const kits = Object.values(START_KITS);
   let kit = locked.has(profile.lastKit) ? 'klassisch' : profile.lastKit;
+  const balls = Object.values(BALLS).filter((b) => !locked.has(b.id));
+  let ball = balls.some((b) => b.id === profile.lastBall) ? profile.lastBall : 'stahl';
+  const ballValue = h('span', { class: 'v' });
   let stage = Math.min(profile.lastStage ?? 0, profile.maxStage ?? 0);
   const info = h('div', { class: 'foot' });
   const kitValue = h('span', { class: 'v' });
@@ -207,7 +219,15 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
     const k = START_KITS[kit];
     kitValue.textContent = `◀ ${k.name.toUpperCase()} ▶`;
     stageValue.textContent = `◀ ${stage}: ${STAGES[stage].name.toUpperCase()} ▶`;
+    ballValue.textContent = `◀ ${BALLS[ball].name.toUpperCase()} ▶`;
   };
+  const stepBall = (d: number) => {
+    const i = balls.findIndex((b) => b.id === ball);
+    ball = balls[(i + d + balls.length) % balls.length].id;
+    renderValues();
+    info.textContent = `${BALLS[ball].name}: ${BALLS[ball].desc}`;
+  };
+  const lockedBalls = Object.keys(BALLS).length - balls.length;
   const stepKit = (d: number) => {
     const open = kits.filter((k) => !locked.has(k.id));
     const i = open.findIndex((k) => k.id === kit);
@@ -221,7 +241,7 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
     info.textContent = `Schuldenstufe ${stage}: ${STAGES.slice(1, stage + 1).map((s) => s.desc).join(' ') || STAGES[0].desc}`;
   };
   renderValues();
-  info.textContent = 'Du hast dir Geld bei den falschen Leuten geliehen. Alle fünf Runden kommen sie an die Kasse. Setz dein echtes Geld, sammel Talismane – und bezahl.';
+  info.textContent = 'Du hast dir Geld bei den falschen Leuten geliehen. Nach je drei Drehs kommen sie an die Kasse. Setz dein echtes Geld, sammel Talismane – und bezahl.';
   const lockedKits = kits.filter((k) => locked.has(k.id)).length;
   const sound = row('TON', soundOn ? 'AN' : 'AUS', () => {
     const on = hd.toggleSound();
@@ -231,12 +251,13 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
     h('h1', { html: 'RIEN NE<br>VA PLUS' }),
     h('div', { class: 'tag', text: 'EIN TISCH. EINE KASSE. SCHULDEN.' }),
     h('div', { class: 'rows' },
-      row('▶ NEUES SPIEL', '', () => hd.start(kit, stage)),
+      row('▶ NEUES SPIEL', '', () => hd.start(kit, stage, ball)),
       row('START', kitValue, () => stepKit(1), { onStep: stepKit, onHover: () => (info.textContent = START_KITS[kit].desc + (lockedKits ? ` · ${lockedKits} weitere gesperrt` : '')) }),
       row('SCHULDENSTUFE', stageValue, () => stepStage(1), {
         onStep: stepStage,
         onHover: () => (info.textContent = (profile.maxStage ?? 0) === 0 ? 'Bezahle alle 8 Raten, um die nächste Schuldenstufe freizuschalten.' : `Freigeschaltet bis Stufe ${profile.maxStage}. ${STAGES[stage].desc}`),
       }),
+      row('KUGEL', ballValue, () => stepBall(1), { onStep: stepBall, onHover: () => (info.textContent = `${BALLS[ball].name}: ${BALLS[ball].desc}` + (lockedBalls ? ` · ${lockedBalls} weitere Kugeln über Erfolge freischalten` : '')) }),
       row('SAMMLUNG', `${profile.done.length}/${ACHIEVEMENTS.length}`, hd.collection),
       row('STEUERUNG', '', hd.controls),
       sound,
@@ -267,12 +288,15 @@ export function collectionView(profile: Profile, back: () => void): HTMLElement 
 export function controlsView(back: () => void): HTMLElement {
   const lines: [string, string][] = [
     ['WASD / PFEILE', 'LAUFEN, SHIFT RENNT'],
-    ['E', 'TISCH, KASSE, VITRINE, TELEFON'],
+    ['E', 'TISCH, KASSE, VITRINE, TELEFON, AUTOMAT'],
+    ['TAB', 'ÜBERSICHT: TALISMANE, SETS, TASCHE, BONI'],
     ['LINKSKLICK', 'JETON SETZEN – AUCH AUF LINIEN UND ECKEN'],
     ['RECHTSKLICK', 'JETON ZURÜCKNEHMEN'],
     ['1–6 / MAUSRAD', 'JETON-WERT'],
     ['LEERTASTE', 'DREHEN, HALTEN = SCHNELLER'],
     ['R / C', 'WIEDERHOLEN / ABRÄUMEN'],
+    ['B / H', 'CROUPIER BESTECHEN / HOCHRISIKO (LETZTER DREH)'],
+    ['7–9', 'SACHEN AUS DER TASCHE BENUTZEN'],
     ['V', 'RAD MIT WAHRSCHEINLICHKEITEN'],
     ['PFEILE + ENTER', 'IN MENÜS'],
     ['M', 'TON AN/AUS'],
@@ -289,7 +313,7 @@ export function gameOverView(run: Run, rewind: () => void): HTMLElement {
     h('div', { style: 'font-size:34px', text: '■ STOP' }),
     h('h1', { text: 'ERWISCHT.' }),
     h('div', { style: 'font-size:28px', html: `DIE GELDEINTREIBER WOLLTEN ${fmt(run.debt)}. DU HATTEST ${fmt(run.cash + run.deposit)}.` }),
-    h('div', { style: 'font-size:24px;opacity:.85', html: `RATEN ${run.paidRates} · RUNDEN ${run.stats.spins} · BESTER GEWINN ${fmt(run.stats.bestWin)} · NACHHOPSER ${run.stats.hops}` }),
+    h('div', { style: 'font-size:24px;opacity:.85', html: `RATEN ${run.paidRates} · DREHS ${run.stats.spins} · BESTER GEWINN ${fmt(run.stats.bestWin)} · NACHHOPSER ${run.stats.hops} · DUELLE ${run.stats.duelWins}/${run.stats.duelWins + run.stats.duelLosses}` }),
     h('div', { class: 'rows' }, row('◀◀ ZURÜCKSPULEN', '', rewind)),
   );
 }
@@ -301,5 +325,113 @@ export function victoryView(run: Run, endless: () => void, restart: () => void):
     h('div', { style: 'font-size:28px', text: `ALLE ${DEBTS.length} RATEN BEZAHLT. DIE HERREN NICKEN UND GEHEN.` }),
     h('div', { style: 'font-size:24px;opacity:.85', text: run.stage < 5 ? `SCHULDENSTUFE ${run.stage + 1} IST JETZT FREIGESCHALTET.` : 'DU HAST DIE HÖCHSTE SCHULDENSTUFE GESCHAFFT.' }),
     h('div', { class: 'rows' }, row('▶ WEITERSPIELEN (ENDLOS)', '', endless), row('◀◀ NEUES BAND', '', restart)),
+  );
+}
+
+/** Why the rate differs from the base rate. */
+export function rateReasons(run: Run): string {
+  const r: string[] = [`Grundrate ${fmt(run.baseDebt)}`];
+  const voodoo = run.items.find((t) => t.def === 'voodoo');
+  if (run.has('teufel')) r.push('Teufel +25 %');
+  if (voodoo) r.push(`Voodoo −${voodoo.gold ? 25 : 15} %`);
+  if (run.stage >= 1) r.push('Stufe +25 %');
+  if (run.items.length && SETS.find((x) => x.id === 'bank')!.items.every((d) => run.has(d))) r.push('Schweizer Konto −10 %');
+  if (run.news === 'razzia') r.push('Razzia −20 %');
+  if (run.news === 'inflation') r.push('Inflation +20 %');
+  if (run.cycle >= run.sharkFrom) r.push(`Kredithai +${Math.round((SHARK_FACTOR - 1) * 100)} %`);
+  if (run.debtFactor !== 1) r.push(`Telefon ×${run.debtFactor.toLocaleString('de-DE', { maximumFractionDigits: 2 })}`);
+  if (run.debtAdd) r.push(`Aufschlag +${fmt(run.debtAdd)}`);
+  return r.join(' · ');
+}
+
+// ---- Overview (TAB) ---------------------------------------------------------------------------
+
+export function overviewView(run: Run, close: () => void): HTMLElement {
+  const items = h('div', { class: 'rows' }, label(`TALISMANE ${run.items.length}/${run.perks.slots}`));
+  if (!run.items.length) items.append(h('div', { class: 'info', text: 'Noch keine. Die Vitrine verkauft sie gegen Glücksmarken (◆). Sie wirken bei jedem Dreh.' }));
+  for (const t of run.items) {
+    items.append(h('div', { class: 'ov' }, h('span', { class: 'n ' + rarityClass(t.def), text: itemName(t) }), h('span', { class: 'd', text: itemDesc(t) })));
+  }
+  items.append(label('SETS · DREI TALISMANE, DIE ZUSAMMENGEHÖREN'));
+  for (const set of SETS) {
+    const have = set.items.filter((d) => run.has(d));
+    items.append(h('div', { class: 'ov' + (have.length === 3 ? ' done' : '') },
+      h('span', { class: 'n', text: `${have.length === 3 ? '◆' : '◇'} ${set.name} ${have.length}/3` }),
+      h('span', { class: 'd', text: `${set.items.map((d) => (run.has(d) ? ITEMS[d].name.toUpperCase() : ITEMS[d].name)).join(' + ')} → ${set.desc}` }),
+    ));
+  }
+  const stats = h('div', { class: 'rows' },
+    label('SO FUNKTIONIERT DER GEWINN'),
+    h('div', { class: 'info', text: 'Jede gewinnende Wette zahlt Einsatz × Quote in die SUMME. Talismane, Fächer und Boni erhöhen den MULT. Ausgezahlt wird SUMME × MULT.' }),
+    label('DEINE WERTE'),
+    stat('GLÜCK', `${run.luck} → ${pct(run.hopChance)} NACHHOPSER`),
+    stat('ZINSEN AUF EINZAHLUNG', pct(run.interestRate) + ' PRO DREH'),
+    stat('GLÜCKSMARKEN', `◆${run.marks}`),
+    stat('KUGEL', `${BALLS[run.ball].name.toUpperCase()}`),
+    h('div', { class: 'info', text: BALLS[run.ball].desc }),
+    run.perks.redMult || run.perks.blackMult ? stat('DAUER-BONI', `ROT +${run.perks.redMult} · SCHWARZ +${run.perks.blackMult} MULT`) : null,
+    label('DIESE RATE'),
+    stat('RATE', `${fmt(run.debt)} NACH ${run.cycleRounds} DREHS`),
+    h('div', { class: 'info', text: rateReasons(run) }),
+    h('div', { class: 'info', text: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }),
+    run.rule ? h('div', { class: 'info', text: `HAUSREGEL: ${RULES[run.rule].name} – ${RULES[run.rule].desc}` }) : null,
+    run.sharkUsed ? h('div', { class: 'info rec-c', text: run.sharkFrom !== Infinity ? `Du hast beim Kredithai geliehen: alle späteren Raten +${Math.round((SHARK_FACTOR - 1) * 100)} %.` : 'Den Kredithai hast du abgewiesen. Er kommt nicht wieder.' }) : null,
+    label(`TASCHE ${run.smokes.length}/${MAX_CONSUMABLES}`),
+    run.smokes.length ? h('div', { class: 'info', text: run.smokes.map((id) => `${CONSUMABLES[id].name}: ${CONSUMABLES[id].desc}`).join('\n') }) : h('div', { class: 'info', text: 'Leer. Der Zigarettenautomat an der rechten Wand verkauft Sachen für einen Dreh.' }),
+    boostLabels(run).length ? h('div', { class: 'info luck-c', text: 'AKTIV FÜR DEN NÄCHSTEN DREH: ' + boostLabels(run).join(' · ') }) : null,
+  );
+  return h('div', { class: 'menu' },
+    head('ÜBERSICHT', 'TAB / ESC SCHLIESST'),
+    h('div', { class: 'cols' }, items, stats),
+    h('div', { class: 'rows' }, row('ZURÜCK', 'ESC', close)),
+  );
+}
+
+function stat(k: string, v: string): HTMLElement {
+  return h('div', { class: 'stat' }, h('span', { text: k }), h('span', { text: v }));
+}
+
+// ---- Cigarette machine ------------------------------------------------------------------------
+
+export function automatView(run: Run, locked: Set<string>, buy: (id: string) => void, close: () => void): HTMLElement {
+  const detail = h('div', { class: 'info', style: 'min-height:2.2em' });
+  const list = h('div', { class: 'rows' }, label(`BARGELD ${fmt(run.cash)} · TASCHE ${run.smokes.length}/${MAX_CONSUMABLES}`));
+  for (const c of Object.values(CONSUMABLES)) {
+    if (locked.has(c.id)) {
+      list.append(row(`<span style="opacity:.5">??? GESPERRT</span>`, '', undefined, { disabled: true }));
+      continue;
+    }
+    const price = run.smokePrice(c.id);
+    const instant = c.id === 'rubbellos' || c.id === 'espresso';
+    const full = !instant && run.smokes.length >= MAX_CONSUMABLES;
+    list.append(row(c.name, full ? 'TASCHE VOLL' : `<span class="money-c">${fmt(price)}</span>`, () => buy(c.id), {
+      disabled: full || run.cash < price || (c.id === 'espresso' && run.phase !== 'betting'),
+      onHover: () => (detail.textContent = c.desc),
+    }));
+  }
+  list.append(row('ZURÜCK', 'ESC', close, { onHover: () => (detail.textContent = 'Die Preise steigen mit der Rate.') }));
+  detail.textContent = CONSUMABLES.zigarette.desc;
+  return h('div', { class: 'menu', style: 'width:min(820px,100%)' },
+    head('ZIGARETTEN', 'AUTOMAT'),
+    h('div', { class: 'info', text: 'Sachen für einen Dreh. Benutzen am Tisch mit den Tasten 7, 8, 9.' }),
+    list,
+    detail,
+  );
+}
+
+// ---- Loan shark -------------------------------------------------------------------------------
+
+export function sharkView(run: Run, take: () => void, decline: () => void): HTMLElement {
+  const extra = Math.round((SHARK_FACTOR - 1) * 100);
+  const says = run.sharkDue
+    ? '„Die Herren an der Kasse sind ungeduldig, hm? Ich leg dir was hin. Einmal. Und du weißt, was das kostet."'
+    : '„Leere Taschen, mein Freund? Ich helf dir. Einmal. Danach gehörst du ein bisschen mir."';
+  return h('div', { class: 'menu', style: 'margin-top:auto;margin-bottom:6vh;width:min(900px,100%)' },
+    h('div', { style: 'color:var(--luck);font-size:32px;text-align:center', text: 'KREDITHAI: ' + says }),
+    h('div', { class: 'rows' },
+      row(`GELD NEHMEN: +${fmt(run.sharkAmount)}`, `ALLE SPÄTEREN RATEN +${extra} %`, take),
+      row('ABLEHNEN', run.sharkDue ? 'DAS SPIEL IST VORBEI' : 'OHNE GELD WEITER', decline),
+    ),
+    h('div', { class: 'info', style: 'text-align:center', text: 'Der Kredithai kommt nur ein einziges Mal pro Spiel.' }),
   );
 }

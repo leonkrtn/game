@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { sfx } from './audio';
-import { ITEMS, OFFERS, POCKET_ITEMS, RULES, type PocketToolId } from './game/content';
+import { CONSUMABLES, ITEMS, NEWS, OFFERS, POCKET_ITEMS, RULES, SHARK_FACTOR, type PocketToolId } from './game/content';
 import { FIELD_BY_ID } from './game/fields';
 import { checkAchievements, loadProfile, lockedIds, recordRun, rewardName, saveProfile, type Profile } from './game/meta';
 import { Run, RUSH_SECONDS } from './game/run';
@@ -9,17 +9,18 @@ import { Input } from './input';
 import { $, fmt, fmtMult } from './ui/dom';
 import {
   availableChips, bigWin, bump, closeModal, coveredCells, floater, hideOsd, modalOpen, navModal, openModal, renderFieldInfo,
-  renderItemTip, renderOsd, renderScore, renderTableBar, setBanner, setHelp, setPrompt, toast, type ScoreState,
+  renderItemTip, renderOsd, renderScore, renderSlip, renderTableBar, setBanner, setHelp, setPrompt, toast, type ScoreState,
 } from './ui/hud';
 import {
-  collectionView, controlsView, gameOverView, kasseView, phoneView, startView, victoryView, vitrineView, wheelView,
+  automatView, collectionView, controlsView, gameOverView, kasseView, overviewView, phoneView, sharkView, startView, victoryView,
+  vitrineView, wheelView,
 } from './ui/screens';
 import { ItemPreview } from './world/preview';
 import { World } from './world/world';
 
-type Mode = 'start' | 'room' | 'table' | 'spinning' | 'kasse' | 'vitrine' | 'phone' | 'caught' | 'over';
+type Mode = 'start' | 'room' | 'table' | 'spinning' | 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'shark' | 'caught' | 'over';
 
-const ROOM_HELP = '<span><kbd>WASD</kbd> LAUFEN</span><span><kbd>SHIFT</kbd> RENNEN</span><span><kbd>E</kbd> BENUTZEN</span><span><kbd>V</kbd> RAD</span><span><kbd>M</kbd> TON</span>';
+const ROOM_HELP = '<span><kbd>WASD</kbd> LAUFEN</span><span><kbd>SHIFT</kbd> RENNEN</span><span><kbd>E</kbd> BENUTZEN</span><span><kbd>TAB</kbd> ÜBERSICHT</span><span><kbd>V</kbd> RAD</span><span><kbd>M</kbd> TON</span>';
 
 export class Game {
   private world: World;
@@ -44,6 +45,7 @@ export class Game {
   private spinStage: 'rolling' | 'scoring' = 'rolling';
   private caughtTimer = 0;
   private ringTimer = 0;
+  private overview = false;
   private last = performance.now();
   /** Largest simulated step per frame; raised by automated tests on slow software renderers. */
   maxDt = 0.05;
@@ -123,7 +125,7 @@ export class Game {
     setHelp('<span>PFEILE + ENTER</span><span>◀ ▶ ÄNDERN</span>');
     $('tablebar').classList.add('hidden');
     openModal(startView(this.profile, lockedIds(this.profile), {
-      start: (kit, stage) => this.newRun(kit, stage),
+      start: (kit, stage, ball) => this.newRun(kit, stage, ball),
       collection: () => openModal(collectionView(this.profile, () => this.showStart()), 'vcr'),
       controls: () => openModal(controlsView(() => this.showStart()), 'vcr'),
       toggleSound: () => {
@@ -133,12 +135,15 @@ export class Game {
     }, !sfx.muted), 'clear');
   }
 
-  private newRun(kit: string, stage: number): void {
+  private newRun(kit: string, stage: number, ball = 'stahl'): void {
     sfx.unlock();
     this.profile.lastKit = kit;
     this.profile.lastStage = stage;
+    this.profile.lastBall = ball;
     saveProfile(this.profile);
-    this.run = new Run({ kit, stage, locked: lockedIds(this.profile) });
+    this.run = new Run({ kit, stage, ball, locked: lockedIds(this.profile) });
+    this.world.setBall(ball);
+    this.world.dismissShark();
     this.shownCash = this.run.cash;
     this.shownCashValue = this.run.cash;
     this.score = undefined;
@@ -163,6 +168,8 @@ export class Game {
     this.world.markCells = new Set(r.visions.map((i) => `n${r.wheel[i].number}`));
     this.world.setMarquee(r.history, r.debt, r.round, r.cycleRounds);
     this.world.phoneRinging = r.offers.length > 0;
+    this.world.setNews(r.news ? `${NEWS[r.news].headline} · ${NEWS[r.news].desc.toUpperCase()}` : '');
+    this.world.setRival(r.duel);
     this.osdDirty = true;
   }
 
@@ -185,6 +192,7 @@ export class Game {
     $('tablebar').classList.add('hidden');
     $('fieldinfo').classList.add('hidden');
     $('timer').classList.add('hidden');
+    renderSlip(this.run, false);
     setHelp(ROOM_HELP);
     this.osdDirty = true;
     this.updateBanner();
@@ -205,6 +213,88 @@ export class Game {
     if (this.run.rule === 'eile' && this.rushLeft === undefined) this.rushLeft = RUSH_SECONDS;
     this.clampChip();
     this.renderTable();
+    if (this.run.duel) toast(`DUELL: ${this.run.duel.name.toUpperCase()} SPIELT GEGEN DICH. GEWINN MEHR ALS ER!`, 'boss');
+    else if (this.run.roundsLeft === 1) toast('LETZTER DREH VOR DER RATE. <kbd>H</kbd> = HOCHRISIKO.');
+  }
+
+  private openSmokes(): void {
+    this.mode = 'smokes';
+    this.world.cameraMode = 'smokes';
+    this.world.standAt('smokes');
+    setPrompt();
+    this.renderSmokes();
+  }
+
+  private renderSmokes(): void {
+    openModal(automatView(this.run, lockedIds(this.profile), (id) => {
+      const msg = this.run.buySmoke(id);
+      if (!msg) {
+        sfx.error();
+        return;
+      }
+      sfx.coin();
+      toast(`${CONSUMABLES[id].name.toUpperCase()}: ${msg}`);
+      this.shownCash = this.run.cash;
+      this.checkUnlocks();
+      this.syncWorld();
+      this.renderSmokes();
+    }, () => this.closePanel()), 'vcr', () => this.closePanel());
+  }
+
+  private toggleOverview(): void {
+    if (this.overview) {
+      this.overview = false;
+      closeModal();
+      return;
+    }
+    if (modalOpen()) return;
+    this.overview = true;
+    openModal(overviewView(this.run, () => this.toggleOverview()), 'vcr', () => this.toggleOverview());
+  }
+
+  // ---- Loan shark ----------------------------------------------------------------------
+
+  private startShark(): void {
+    this.mode = 'shark';
+    this.world.standAtTable(false);
+    this.world.summonShark();
+    this.world.cameraMode = 'shark';
+    $('tablebar').classList.add('hidden');
+    renderSlip(this.run, false);
+    setBanner();
+    setPrompt();
+    sfx.threat();
+    toast(this.run.sharkDue ? 'DU KANNST NICHT ZAHLEN. JEMAND IN WEISS KOMMT HEREIN.' : 'DU BIST PLEITE. JEMAND IN WEISS KOMMT HEREIN.', 'boss');
+    setTimeout(() => {
+      if (this.mode !== 'shark') return;
+      openModal(sharkView(this.run, () => {
+        const amount = this.run.takeShark();
+        sfx.cash();
+        closeModal();
+        toast(`+${fmt(amount)} VOM KREDITHAI. AB DER NÄCHSTEN RATE ZAHLST DU ${Math.round((SHARK_FACTOR - 1) * 100)} % MEHR.`, 'boss');
+        this.shownCash = this.run.cash;
+        this.world.dismissShark();
+        this.afterShark();
+      }, () => {
+        this.run.declineShark();
+        closeModal();
+        this.world.dismissShark();
+        this.afterShark();
+      }), 'clear');
+    }, 2200);
+  }
+
+  private afterShark(): void {
+    this.syncWorld();
+    if (this.run.phase === 'gameover') {
+      this.startCaught();
+      return;
+    }
+    if (this.run.phase === 'due') {
+      this.world.summonThugs();
+      toast('DIE TÜR GEHT AUF.', 'boss');
+    }
+    this.enterRoom();
   }
 
   private openKasse(): void {
@@ -325,7 +415,7 @@ export class Game {
 
   private closePanel(): void {
     closeModal();
-    if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'phone') this.enterRoom();
+    if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'phone' || this.mode === 'smokes') this.enterRoom();
   }
 
   private pay(): void {
@@ -361,6 +451,7 @@ export class Game {
     setBanner();
     setPrompt();
     this.world.standAtTable(false);
+    renderSlip(this.run, false);
     this.world.thugsAttack();
     this.world.cameraMode = 'caught';
     sfx.caught();
@@ -416,6 +507,43 @@ export class Game {
     this.renderTable();
   }
 
+  private bribe(): void {
+    if (!this.run.bribe()) {
+      sfx.error();
+      return;
+    }
+    sfx.coin();
+    this.world.croupierNod();
+    this.shownCash = this.run.cash;
+    toast('DER CROUPIER NICKT UNAUFFÄLLIG.');
+    this.renderTable();
+  }
+
+  private toggleRisk(): void {
+    if (!this.run.setHighRisk(!this.run.highRisk)) {
+      sfx.error();
+      toast(this.run.stakeTotal ? 'DAFÜR BRAUCHST DU NOCH EINMAL SO VIEL BARGELD WIE DEIN EINSATZ.' : 'ERST SETZEN, DANN HOCHRISIKO.');
+      return;
+    }
+    if (this.run.highRisk) {
+      sfx.threat();
+      this.world.distort(0.5);
+      toast('HOCHRISIKO: GEWINN ×2 MULT – VERLUST DOPPELT. EINSÄTZE SIND GESPERRT.', 'boss');
+    } else {
+      sfx.pickup();
+    }
+    this.shownCash = this.run.cash;
+    this.renderTable();
+  }
+
+  private useSmoke(i: number): void {
+    const id = this.run.smokes[i];
+    if (!id || !this.run.useSmoke(i)) return;
+    sfx.select();
+    toast(`${CONSUMABLES[id].name.toUpperCase()}: ${CONSUMABLES[id].desc}`);
+    this.renderTable();
+  }
+
   private repeatBets(): void {
     if (this.run.stakeTotal > 0) return;
     if (this.run.repeatBets()) {
@@ -445,7 +573,15 @@ export class Game {
     this.confirmEmpty = false;
     this.rushLeft = undefined;
     $('timer').classList.add('hidden');
+    renderSlip(this.run, false);
+    const bribed = this.run.bribed;
     const r = this.run.spin();
+    if (this.run.bribeCaught) {
+      sfx.error();
+      toast('DER SAALCHEF HAT DIE BESTECHUNG GESEHEN! DAS GELD IST WEG, DIE RATE STEIGT UM 20 %.', 'boss');
+    } else if (bribed) {
+      this.world.croupierNod();
+    }
     this.mode = 'spinning';
     this.spinStage = 'rolling';
     this.score = { sum: 0, mult: 1, lines: [] };
@@ -594,19 +730,30 @@ export class Game {
       this.startCaught();
       return;
     }
-    this.mode = 'table';
-    this.world.cameraMode = 'table';
+    const d = this.run.lastDuel;
+    if (d) {
+      this.world.rivalReact(d.outcome === 'lost');
+      if (d.outcome === 'won') toast(`DUELL GEWONNEN GEGEN ${d.name.toUpperCase()} (${fmt(d.playerNet ?? 0)} ZU ${fmt(d.rivalNet ?? 0)}): +◆3 UND ${fmt(d.stake)}.`, 'unlock');
+      else if (d.outcome === 'lost') toast(`DUELL VERLOREN GEGEN ${d.name.toUpperCase()} (${fmt(d.playerNet ?? 0)} ZU ${fmt(d.rivalNet ?? 0)}): DIE RATE STEIGT UM 15 %.`, 'boss');
+      else toast(`DUELL UNENTSCHIEDEN GEGEN ${d.name.toUpperCase()}.`);
+    }
+    if (this.run.duel && !d) setTimeout(() => toast(`EIN STAMMGAST SETZT SICH AN DEN TISCH: ${this.run.duel?.name.toUpperCase() ?? ''} WILL EIN DUELL.`, 'boss'), 900);
     this.clampChip();
+    this.rushLeft = undefined;
+    if (this.run.phase === 'shark') {
+      this.startShark();
+      return;
+    }
+    // After every spin you get up from the table and walk the room again.
+    this.enterRoom();
     if (this.run.phase === 'due') {
       this.world.summonThugs();
       sfx.threat();
-      toast('DIE TÜR GEHT AUF.', 'boss');
-      this.enterRoom();
-    } else if (this.run.rule === 'eile') {
-      this.rushLeft = RUSH_SECONDS;
+      toast('DIE TÜR GEHT AUF. DIE RATE IST FÄLLIG.', 'boss');
+    } else {
+      toast(`DREH ${this.run.round - 1}/${this.run.cycleRounds} GESPIELT. <kbd>E</kbd> AM TISCH FÜR DEN NÄCHSTEN.`);
     }
     this.updateBanner();
-    this.renderTable();
   }
 
   private updateBanner(): void {
@@ -631,7 +778,11 @@ export class Game {
       clear: () => this.clearBets(),
       leave: () => this.enterRoom(),
       wheel: () => this.showWheel(),
+      bribe: () => this.bribe(),
+      risk: () => this.toggleRisk(),
+      smoke: (i) => this.useSmoke(i),
     }, this.mode === 'spinning');
+    renderSlip(this.run, this.mode === 'table');
     this.osdDirty = true;
   }
 
@@ -657,10 +808,12 @@ export class Game {
       toast(sfx.muted ? 'TON AUS' : 'TON AN');
     }
 
+    if (!modalOpen()) this.overview = false;
     if (modalOpen()) {
       for (const k of presses) navModal(k);
-      if (presses.includes('Escape')) {
-        if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'phone') this.closePanel();
+      if (this.overview && (presses.includes('Escape') || presses.includes('Tab'))) this.toggleOverview();
+      else if (presses.includes('Escape')) {
+        if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'phone' || this.mode === 'smokes') this.closePanel();
         else if (this.mode === 'room' || this.mode === 'table') closeModal();
         else if (this.mode === 'start') this.showStart();
       }
@@ -714,12 +867,13 @@ export class Game {
     const sprint = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
     this.world.movePlayer(dt, new THREE.Vector2(a.x, a.y), sprint);
 
-    const spot = this.world.nearKasse() ? 'kasse' : this.world.nearVitrine() ? 'vitrine' : this.world.nearPhone() ? 'phone' : this.world.nearTable() ? 'table' : undefined;
+    const spot = this.world.nearKasse() ? 'kasse' : this.world.nearVitrine() ? 'vitrine' : this.world.nearPhone() ? 'phone' : this.world.nearSmokes() ? 'smokes' : this.world.nearTable() ? 'table' : undefined;
     const due = this.run.phase === 'due';
     switch (spot) {
       case 'kasse': setPrompt(`<kbd>E</kbd> KASSE${due ? ' – RATE BEZAHLEN' : ''}`); break;
       case 'vitrine': setPrompt('<kbd>E</kbd> VITRINE'); break;
       case 'phone': setPrompt(this.run.offers.length ? '<kbd>E</kbd> RANGEHEN' : 'DAS TELEFON SCHWEIGT.'); break;
+      case 'smokes': setPrompt('<kbd>E</kbd> ZIGARETTENAUTOMAT'); break;
       case 'table': setPrompt(due ? 'DIE RATE IST FÄLLIG – ERST ZUR KASSE!' : '<kbd>E</kbd> AN DEN TISCH'); break;
       default: setPrompt();
     }
@@ -727,9 +881,11 @@ export class Game {
       if (spot === 'kasse') this.openKasse();
       else if (spot === 'vitrine') this.openVitrine();
       else if (spot === 'phone') this.answerPhone();
+      else if (spot === 'smokes') this.openSmokes();
       else if (spot === 'table') this.enterTable();
     }
     if (presses.includes('KeyV')) this.showWheel();
+    if (presses.includes('Tab')) this.toggleOverview();
     this.hoverItems();
   }
 
@@ -742,10 +898,14 @@ export class Game {
     this.world.movePlayer(dt, new THREE.Vector2(), false);
     const list = availableChips(this.run.moneyBefore);
     for (const k of presses) {
-      if (k.startsWith('Digit')) {
+      if (k.startsWith('Digit') && Number(k.slice(5)) <= 6) {
         const v = list[Number(k.slice(5)) - 1];
         if (v) this.selectChip(v);
       }
+      if (k === 'Digit7' || k === 'Digit8' || k === 'Digit9') this.useSmoke(Number(k.slice(5)) - 7);
+      if (k === 'KeyB') this.bribe();
+      if (k === 'KeyH') this.toggleRisk();
+      if (k === 'Tab') this.toggleOverview();
       if (k === 'KeyR') this.repeatBets();
       if (k === 'KeyC') this.clearBets();
       if (k === 'Space' || k === 'Enter') this.spin();

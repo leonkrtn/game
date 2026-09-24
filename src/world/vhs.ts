@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export const MAX_FACES = 8;
+export const MAX_FACES = 10;
 
 /**
  * Final image treatment: the whole game looks like a worn 1980s VHS recording.
@@ -72,12 +72,14 @@ export const VhsShader = {
       float line = floor(uv.y * resolution.y * 0.5);
       float frame = floor(time * 30.0);
       // Per-line jitter, a rolling tracking band and the head-switching noise at the bottom.
-      float jitter = (hash(vec2(line, frame)) - 0.5) * 0.0012 * a;
-      float bandY = fract(0.15 - time * 0.035);
-      float band = exp(-pow((uv.y - bandY) * 38.0, 2.0));
-      float headSwitch = smoothstep(0.035, 0.0, uv.y) * a;
+      float jitter = (hash(vec2(line, frame)) - 0.5) * 0.0005 * a;
+      // The tracking band only rolls through now and then (about every 25 s) instead of all the time.
+      float cycle = fract(time / 25.0);
+      float bandY = 1.15 - cycle * 6.0;
+      float band = exp(-pow((uv.y - bandY) * 30.0, 2.0)) * step(cycle, 0.25);
+      float headSwitch = smoothstep(0.018, 0.0, uv.y) * a;
       float g = glitch;
-      uv.x += jitter + band * (hash(vec2(frame, line)) - 0.5) * 0.012 * a + headSwitch * 0.03 * (hash(vec2(line, frame * 1.3)) - 0.2);
+      uv.x += jitter + band * (hash(vec2(frame, line)) - 0.5) * 0.006 * a + headSwitch * 0.015 * (hash(vec2(line, frame * 1.3)) - 0.2);
       uv.x += g * (hash(vec2(floor(uv.y * 24.0), frame)) - 0.5) * 0.06;
 
       // Low chroma resolution: luma is sharp, colour smears sideways.
@@ -106,12 +108,13 @@ export const VhsShader = {
       col = col * (1.0 - 0.05 * a) + 0.035 * a;
 
       // Scanlines, grain and dropouts.
-      col *= 1.0 - 0.09 * a * (0.5 + 0.5 * sin(uv.y * resolution.y * 3.14159));
-      col += (hash(uv * resolution + time * 60.0) - 0.5) * 0.07 * a;
-      float drop = step(0.9985 - g * 0.01, hash(vec2(line * 0.37, frame)));
-      col = mix(col, vec3(0.9), drop * step(0.7, hash(vec2(uv.x * 40.0, frame))) * a);
-      col += band * 0.06 * a;
-      col = mix(col, vec3(hash(vec2(uv.x * 400.0, frame + line))), headSwitch * 0.5);
+      col *= 1.0 - 0.035 * a * (0.5 + 0.5 * sin(uv.y * resolution.y * 3.14159));
+      col += (hash(uv * resolution + time * 60.0) - 0.5) * 0.055 * a;
+      // White dropout streaks: rare, and mostly when the tape is disturbed.
+      float drop = step(0.99985 - g * 0.01, hash(vec2(line * 0.37, frame)));
+      col = mix(col, vec3(0.85), drop * step(0.8, hash(vec2(uv.x * 40.0, frame))) * a);
+      col += band * 0.025 * a;
+      col = mix(col, vec3(hash(vec2(uv.x * 400.0, frame + line))), headSwitch * 0.3);
 
       // Vignette.
       vec2 v = vUv - 0.5;

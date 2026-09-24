@@ -12,6 +12,7 @@ interface Bot {
   f: number;
   shop: boolean;
   early: boolean;
+  shark?: boolean;
 }
 
 const PREFS = ['pfennig', 'kerze', 'hufeisen', 'sanduhr', 'sparschwein', 'katze', 'zinnsoldat', 'wuerfel', 'abakus', 'glocke', 'teufel', 'goldkugel', 'zigarre', 'police'];
@@ -45,6 +46,9 @@ function play(seed: number, bot: Bot): number {
     else if (run.phase === 'due') {
       run.pay();
       if (run.offers.length) run.chooseOffer(0);
+    } else if (run.phase === 'shark') {
+      if (bot.shark) run.takeShark();
+      else run.declineShark();
     } else break;
   }
   return run.paidRates;
@@ -58,6 +62,7 @@ it('balance', () => {
     { name: 'Rot 100% +Shop', f: 1, shop: true, early: false },
     { name: 'Sparer 30/50 +Shop', f: 0.5, save: 0.3, shop: true, early: false },
     { name: 'Sparer 15/60 +Shop', f: 0.6, save: 0.15, shop: true, early: false },
+    { name: 'Rot 60% +Shop +Hai', f: 0.6, shop: true, early: false, shark: true },
   ];
   for (const bot of bots) {
     const N = 3000;
@@ -71,4 +76,4 @@ it('balance', () => {
     }
     process.stderr.write(`${bot.name.padEnd(22)} | ${rows.join(' ')}\n`);
   }
-});
+}, 120000);

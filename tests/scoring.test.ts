@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { DEBTS, SHARK_FACTOR } from '../src/game/content';
 import { Run } from '../src/game/run';
 import { pocketWeights, scoreSpin, type Perks, type SpinInput } from '../src/game/scoring';
 import type { Pocket } from '../src/game/types';
@@ -67,6 +68,15 @@ describe('scoreSpin', () => {
     expect(scoreSpin(inp, idx(inp.wheel, 1)).mult).toBe(15);
   });
 
+  it('golden talismans and sets are stronger', () => {
+    const gold = input({ bets: { red: [10] }, items: [{ ...item(1, 'kerze'), gold: true }] });
+    expect(scoreSpin(gold, idx(gold.wheel, 1)).mult).toBe(3);
+    const set = input({ bets: { red: [10] }, items: [item(1, 'kerze'), item(2, 'zippo'), item(3, 'sanduhr')] });
+    expect(scoreSpin(set, idx(set.wheel, 1)).mult).toBe(4);
+    const nightSkull = input({ bets: { n0: [10] }, items: [{ ...item(1, 'totenkopf'), gold: true }] });
+    expect(scoreSpin(nightSkull, idx(nightSkull.wheel, 0)).mult).toBe(11);
+  });
+
   it('magnets and heavy pockets raise the weight', () => {
     const w = wheel();
     w[idx(w, 5)].mod = 'schwer';
@@ -95,6 +105,7 @@ describe('Run', () => {
 
   it('deposits earn interest and pay the rate', () => {
     const run = new Run({ seed: 7 });
+    run.news = '';
     run.cash = 1000;
     run.depositCash(200);
     run.spin();
@@ -103,7 +114,7 @@ describe('Run', () => {
     const marks = run.marks;
     const early = run.roundsLeft;
     expect(run.pay()).toBe(true);
-    expect(run.deposit).toBe(216 - run.paidRates * 50);
+    expect(run.deposit).toBe(216 - DEBTS[0]);
     expect(run.marks).toBe(marks + 3 + early);
     expect(run.cycle).toBe(1);
     expect(run.offers.length).toBe(3);
@@ -120,13 +131,97 @@ describe('Run', () => {
     expect(hard.activeRule).toBeUndefined();
   });
 
-  it('is game over when the rate cannot be paid', () => {
+  it('the loan shark comes once, then it is game over', () => {
     const run = new Run({ seed: 3 });
+    run.news = '';
     run.cash = 0;
     run.roundsLeft = 1;
     run.spin();
     run.settle();
+    expect(run.phase).toBe('shark');
+    const before = run.debt;
+    run.takeShark();
+    expect(run.phase).toBe('due');
+    expect(run.canPay()).toBe(true);
+    expect(run.debt).toBe(before);
+    run.pay();
+    run.news = '';
+    expect(run.debt).toBe(Math.round(DEBTS[1] * SHARK_FACTOR));
+    run.cash = 0;
+    run.deposit = 0;
+    run.roundsLeft = 1;
+    run.phase = 'betting';
+    run.spin();
+    run.settle();
     expect(run.phase).toBe('gameover');
+  });
+
+  it('declining the loan shark at the rate ends the run', () => {
+    const run = new Run({ seed: 4 });
+    run.cash = 0;
+    run.roundsLeft = 1;
+    run.spin();
+    run.settle();
+    run.declineShark();
+    expect(run.phase).toBe('gameover');
+  });
+
+  it('a second copy turns a talisman golden without a new slot', () => {
+    const run = new Run({ seed: 5, kit: 'klassisch' });
+    run.marks = 50;
+    run.shop = [{ kind: 'item', def: 'hufeisen', price: 5, fuse: true }];
+    const luck = run.luck;
+    const count = run.items.length;
+    expect(run.buy(0)).toBe(true);
+    expect(run.items.length).toBe(count);
+    expect(run.items[0].gold).toBe(true);
+    expect(run.luck).toBe(luck + 1);
+  });
+
+  it('high risk doubles the loss and the mult', () => {
+    const run = new Run({ seed: 11 });
+    run.cash = 100;
+    run.roundsLeft = 1;
+    run.placeBet('red', 20);
+    expect(run.setHighRisk(true)).toBe(true);
+    expect(run.cash).toBe(60);
+    expect(run.placeBet('black', 5)).toBe(false);
+    const r = run.spin();
+    run.settle();
+    if (r.anyWin) expect(run.cash).toBe(60 + 20 + 20 * 2 * 2);
+    else expect(run.cash).toBe(60);
+  });
+
+  it('cigarette machine items work for one spin', () => {
+    const run = new Run({ seed: 12 });
+    run.cash = 1000;
+    expect(run.buySmoke('zigarette')).toBeTruthy();
+    const luck = run.luck;
+    run.useSmoke(0);
+    expect(run.luck).toBe(luck + 4);
+    run.spin();
+    run.settle();
+    expect(run.luck).toBe(luck);
+  });
+
+  it('a rival challenges you every few spins', () => {
+    const run = new Run({ seed: 13 });
+    run.cash = 1e12;
+    let duels = 0;
+    for (let i = 0; i < 40; i++) {
+      if (run.phase === 'due') {
+        run.pay();
+        run.offers = [];
+        run.phase = 'betting';
+      }
+      if (run.phase === 'victory') run.continueEndless();
+      if (run.duel) duels++;
+      run.placeBet('red', 5);
+      run.spin();
+      run.settle();
+    }
+    expect(duels).toBeGreaterThanOrEqual(3);
+    expect(duels).toBeLessThanOrEqual(6);
   });
 
   it('luck lets the ball hop into a paying neighbour', () => {

@@ -1,4 +1,4 @@
-import { ITEMS, POCKET_MOD_INFO, type RuleId } from './content';
+import { ITEMS, POCKET_MOD_INFO, SETS, type RuleId, type SetDef } from './content';
 import { FIELD_BY_ID, fieldWins, isInsideCombo, isOutside } from './fields';
 import type { Bets, ItemInstance, Pocket } from './types';
 import { POCKET_COUNT } from './wheel';
@@ -30,7 +30,26 @@ export interface SpinInput {
   lossStreak?: number;
   /** True when the bets equal last round's bets. */
   sameBets?: boolean;
+  /** News flash of the current rate. */
+  news?: string;
+  /** Ball in play. */
+  ball?: string;
+  /** One-shot items used for this spin. */
+  boost?: Boost;
+  /** Last spin of the rate played as all-or-nothing: ×2 Mult. */
+  highRisk?: boolean;
 }
+
+/** Effects of cigarette-machine items that last for one spin. */
+export interface Boost {
+  luck: number;
+  gezinkt: boolean;
+  kreide: boolean;
+  kaugummi: boolean;
+  korn: boolean;
+}
+
+export const noBoost = (): Boost => ({ luck: 0, gezinkt: false, kreide: false, kaugummi: false, korn: false });
 
 export interface BetResult {
   fieldId: string;
@@ -81,24 +100,37 @@ export function activeItems(items: ItemInstance[]): { src: ItemInstance; inst: I
   });
 }
 
+/** Strength of an item: 2 when golden (a mirror counts as golden when it or its target is). */
+export const levelOf = (x: { src: ItemInstance; inst: ItemInstance }) => (x.src.gold || x.inst.gold ? 2 : 1);
+
+/** Sets whose three talismans all stand on the table. */
+export function activeSets(items: ItemInstance[]): SetDef[] {
+  const defs = new Set(items.map((t) => t.def));
+  return SETS.filter((s) => s.items.every((d) => defs.has(d)));
+}
+
+export const hasSet = (items: ItemInstance[], id: string) => activeSets(items).some((s) => s.id === id);
+
 export function luckOf(items: ItemInstance[], perks: Perks): number {
   const free = Math.max(0, perks.slots - items.length);
-  return perks.luck + activeItems(items).reduce((a, x) => a + (ITEMS[x.inst.def].luck ?? 0) + (x.inst.def === 'hasenpfote' ? free : 0), 0);
+  const fromItems = activeItems(items).reduce((a, x) => a + ((ITEMS[x.inst.def].luck ?? 0) + (x.inst.def === 'hasenpfote' ? free : 0)) * (ITEMS[x.inst.def].rarity === 'legendary' ? 1 : levelOf(x)), 0);
+  return perks.luck + fromItems + (hasSet(items, 'aberglaube') ? 3 : 0);
 }
 
 /** Relative chance of the ball landing in each pocket. */
-export function pocketWeights(wheel: Pocket[], bets: Bets, items: ItemInstance[], rule?: RuleId): number[] {
-  const act = activeItems(items).map((x) => x.inst.def);
-  const magnets = act.filter((d) => d === 'magnet').length;
-  const skulls = act.filter((d) => d === 'totenkopf').length;
+export function pocketWeights(wheel: Pocket[], bets: Bets, items: ItemInstance[], rule?: RuleId, extra: { ball?: string; kreide?: boolean } = {}): number[] {
+  const act = activeItems(items);
+  const magnet = act.filter((x) => x.inst.def === 'magnet').reduce((a, x) => a * (levelOf(x) === 2 ? 3 : 2), 1);
+  const skulls = act.filter((x) => x.inst.def === 'totenkopf').length;
   const pleins = new Set(Object.keys(bets).filter((id) => FIELD_BY_ID[id].kind === 'straight').map((id) => FIELD_BY_ID[id].value));
   return wheel.map((p) => {
     let w = p.mod === 'schwer' ? 2 : 1;
     if (p.number === 0) {
       if (rule === 'nullnebel') w *= 4;
+      if (extra.ball === 'elfenbein') w *= 2;
       w *= Math.pow(2, skulls);
     }
-    if (pleins.has(p.number)) w *= Math.pow(2, magnets);
+    if (pleins.has(p.number)) w *= magnet * (extra.kreide ? 3 : 1);
     return w;
   });
 }
@@ -131,14 +163,15 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   }
   // The pager turns near misses on pleins into small wins.
   const pagers = activeItems(items).filter((x) => x.inst.def === 'pager');
+  const pagerPay = pagers.some((x) => levelOf(x) === 2) ? 16 : 8;
   if (pagers.length) {
     const near = neighborIndices(pocketIndex).map((i) => wheel[i].number);
     for (const r of results) {
       const f = FIELD_BY_ID[r.fieldId];
       if (!r.won && f.kind === 'straight' && near.includes(f.value)) {
         r.won = true;
-        r.payout = 8;
-        r.amount = r.stake * 8;
+        r.payout = pagerPay;
+        r.amount = r.stake * pagerPay;
       }
     }
   }
@@ -149,12 +182,18 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     lines.push({ kind: 'bet', text: `${FIELD_BY_ID[w.fieldId].label}: $${w.stake} × ${w.payout}`, amount: w.amount, fieldId: w.fieldId });
   }
   let sum = winners.reduce((a, r) => a + r.amount, 0);
-  for (const { src, inst } of active) {
-    if (inst.def === 'pfennig' && winners.length) {
-      const bonus = 5 * winners.length;
+  for (const x of active) {
+    if (x.inst.def === 'pfennig' && winners.length) {
+      const bonus = 5 * levelOf(x) * winners.length;
       sum += bonus;
-      lines.push({ kind: 'bet', text: `${ITEMS[src.def].name}: +$${bonus}`, amount: bonus, item: src.uid });
+      lines.push({ kind: 'bet', text: `${ITEMS[x.src.def].name}: +$${bonus}`, amount: bonus, item: x.src.uid });
     }
+  }
+  const sets = activeSets(items);
+  if (sets.some((z) => z.id === 'spieler') && sum > 0) {
+    const bonus = Math.floor(sum / 2);
+    sum += bonus;
+    lines.push({ kind: 'bet', text: 'Set Alter Zocker: +50 %', amount: bonus });
   }
 
   const neighbors = neighborIndices(pocketIndex).map((i) => wheel[i].number);
@@ -169,50 +208,60 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     mult += amount;
     lines.push({ kind: 'add', text: `${text} +${fmtMult(amount)}`, amount, item });
   };
+  const glass = input.ball === 'glas';
   if (pocket.color === 'red') add('Rote Tinte', perks.redMult);
   if (pocket.color === 'black') add('Schwarzes Buch', perks.blackMult);
-  if (pocket.mod === 'flamme') add('Flammenfach', 1);
+  if (pocket.mod === 'flamme') add(glass ? 'Flammenfach (Glaskugel)' : 'Flammenfach', glass ? 2 : 1);
+  if (input.news === 'hitze' && pocket.color === 'red') add('Hitzewelle', 1);
+  if (input.news === 'nebel' && pocket.color === 'black') add('Nebel am Hafen', 1);
+  if (input.ball === 'blei') add('Bleikugel', 1);
+  if (input.ball === 'onyx' && pocket.color === 'black') add('Onyx', 1.5);
+  if (input.ball === 'onyx' && pocket.color === 'red') add('Onyx', -0.5);
+  if (input.boost?.korn) add('Doppelkorn', 2);
+  if (sets.some((z) => z.id === 'achtziger')) add('Set Mixtape 87', 2);
 
   const kinds = new Set(winners.map((w) => FIELD_BY_ID[w.fieldId].kind));
   const straightWin = winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight' && w.payout >= 18);
   const growth: Record<number, number> = {};
-  for (const { src, inst } of active) {
-    const name = ITEMS[src.def].name;
+  for (const x of active) {
+    const { src, inst } = x;
+    const name = ITEMS[src.def].name + (levelOf(x) === 2 ? ' (golden)' : '');
+    const g = levelOf(x);
     switch (inst.def) {
       case 'kerze':
-        if (pocket.color === 'red') add(name, 1, src.uid);
+        if (pocket.color === 'red') add(name, g, src.uid);
         break;
       case 'katze':
-        if (pocket.color === 'black') add(name, 1, src.uid);
+        if (pocket.color === 'black') add(name, g, src.uid);
         break;
       case 'wuerfel':
-        if (winners.some((w) => isOutside(FIELD_BY_ID[w.fieldId]) && !['red', 'black'].includes(FIELD_BY_ID[w.fieldId].kind))) add(name, 1, src.uid);
+        if (winners.some((w) => isOutside(FIELD_BY_ID[w.fieldId]) && !['red', 'black'].includes(FIELD_BY_ID[w.fieldId].kind))) add(name, g, src.uid);
         break;
       case 'abakus':
-        if (kinds.has('dozen') || kinds.has('column')) add(name, 1.5, src.uid);
+        if (kinds.has('dozen') || kinds.has('column')) add(name, 1.5 * g, src.uid);
         break;
       case 'fernglas':
-        if (winners.some((w) => isInsideCombo(FIELD_BY_ID[w.fieldId]))) add(name, 2, src.uid);
+        if (winners.some((w) => isInsideCombo(FIELD_BY_ID[w.fieldId]))) add(name, 2 * g, src.uid);
         break;
       case 'zinnsoldat':
-        if (results.length >= 4) add(name, 1, src.uid);
+        if (results.length >= 4) add(name, g, src.uid);
         break;
       case 'walkman':
-        if (results.length === 1) add(name, 1, src.uid);
+        if (results.length === 1) add(name, g, src.uid);
         break;
       case 'kassette':
-        if (input.sameBets) add(name, 1, src.uid);
+        if (input.sameBets) add(name, g, src.uid);
         break;
       case 'goldkette':
-        add(name, Math.min(3, Math.floor(input.moneyBefore / 50) * 0.1), src.uid);
+        add(name, Math.min(3 * g, Math.floor(input.moneyBefore / 50) * 0.1 * g), src.uid);
         break;
       case 'glocke':
         if (anyWin) growth[inst.uid] = 1;
-        add(name, 0.2 * (inst.counter + (growth[inst.uid] ?? 0)), src.uid);
+        add(name, 0.2 * g * (inst.counter + (growth[inst.uid] ?? 0)), src.uid);
         break;
       case 'rabe':
         if (!anyWin && stake > 0) growth[inst.uid] = 1;
-        add(name, 0.5 * inst.counter, src.uid);
+        add(name, 0.5 * g * inst.counter, src.uid);
         break;
     }
   }
@@ -223,37 +272,61 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     mult *= factor;
     lines.push({ kind: 'mul', text: `${text} ×${fmtMult(factor)}`, amount: factor, item });
   };
-  if (pocket.mod === 'kristall') mul('Kristallfach', 2);
-  for (const { src, inst } of active) {
-    const name = ITEMS[src.def].name;
-    if (inst.def === 'totenkopf' && pocket.number === 0) mul(name, 6, src.uid);
-    if (inst.def === 'winkekatze' && straightWin) mul(name, 2, src.uid);
-    if (inst.def === 'sanduhr' && input.isLastSpin) mul(name, 2, src.uid);
-    if (inst.def === 'goldbarren' && pocket.mod === 'gold') mul(name, 2, src.uid);
-    if (inst.def === 'zigarre' && stake >= input.moneyBefore / 2) mul(name, 1.5, src.uid);
+  if (pocket.mod === 'kristall') mul(glass ? 'Kristallfach (Glaskugel)' : 'Kristallfach', glass ? 4 : 2);
+  for (const x of active) {
+    const { src, inst } = x;
+    const name = ITEMS[src.def].name + (levelOf(x) === 2 ? ' (golden)' : '');
+    const up = (f: number) => (levelOf(x) === 2 ? 2 * f - 1 : f);
+    if (inst.def === 'totenkopf' && pocket.number === 0) mul(name, up(6), src.uid);
+    if (inst.def === 'winkekatze' && straightWin) mul(name, up(2), src.uid);
+    if (inst.def === 'sanduhr' && input.isLastSpin) mul(name, up(2), src.uid);
+    if (inst.def === 'goldbarren' && pocket.mod === 'gold') mul(name, up(2), src.uid);
+    if (inst.def === 'zigarre' && stake >= input.moneyBefore / 2) mul(name, levelOf(x) === 2 ? 2 : 1.5, src.uid);
     if (inst.def === 'teufel') mul(name, 2, src.uid);
-    if (inst.def === 'zippo' && (input.lossStreak ?? 0) >= 2) mul(name, 2, src.uid);
-    if (inst.def === 'polaroid' && input.lastNumber === pocket.number) mul(name, 5, src.uid);
-    if (inst.def === 'zauberwuerfel' && input.cubeField && winners.some((w) => w.fieldId === input.cubeField)) mul(name, 3, src.uid);
+    if (inst.def === 'zippo' && (input.lossStreak ?? 0) >= 2) mul(name, up(2), src.uid);
+    if (inst.def === 'polaroid' && input.lastNumber === pocket.number) mul(name, up(5), src.uid);
+    if (inst.def === 'zauberwuerfel' && input.cubeField && winners.some((w) => w.fieldId === input.cubeField)) mul(name, up(3), src.uid);
   }
+  if (sets.some((z) => z.id === 'nacht') && (pocket.color === 'black' || pocket.number === 0)) mul('Set Schwarze Nacht', 2);
+  if (sets.some((z) => z.id === 'feuer') && pocket.color === 'red') mul('Set Feuerteufel', 2);
+  if (input.news === 'lotto' && straightWin) mul('Lottofieber', 1.5);
+  if (input.news === 'komet' && pocket.number === 0) mul('Komet', 3);
+  if (input.news === 'inflation') mul('Inflation', 1.2);
+  if (input.highRisk) mul('Hochrisiko', 2);
   mult = Math.round(mult * 1000) / 1000;
 
   // 4. Money and marks.
   let payout = Math.floor(sum * mult);
   if (!anyWin && stake > 0) {
-    for (const { src, inst } of active) {
-      if (inst.def !== 'police') continue;
-      const back = Math.floor(stake * 0.3);
+    for (const x of active) {
+      if (x.inst.def !== 'police') continue;
+      const share = levelOf(x) === 2 ? 0.6 : 0.3;
+      const back = Math.floor(stake * share);
       if (back > 0) {
         payout += back;
-        lines.push({ kind: 'money', text: `${ITEMS[src.def].name}: 30 % zurück`, amount: back, item: src.uid });
+        lines.push({ kind: 'money', text: `${ITEMS[x.src.def].name}: ${share * 100} % zurück`, amount: back, item: x.src.uid });
+      }
+    }
+    if (input.boost?.kaugummi) {
+      const back = Math.floor(stake / 2);
+      if (back > 0) {
+        payout += back;
+        lines.push({ kind: 'money', text: 'Kaugummi: 50 % zurück', amount: back });
       }
     }
   }
   let marks = 0;
   if (pocket.mod === 'gold') {
-    marks++;
-    lines.push({ kind: 'marks', text: `${POCKET_MOD_INFO.gold.name}fach`, amount: 1 });
+    const m = glass ? 2 : 1;
+    marks += m;
+    lines.push({ kind: 'marks', text: `${POCKET_MOD_INFO.gold.name}fach`, amount: m });
+  }
+  if (input.ball === 'kupfer') {
+    const n = winners.filter((w) => FIELD_BY_ID[w.fieldId].kind === 'straight').length;
+    if (n) {
+      marks += n;
+      lines.push({ kind: 'marks', text: 'Kupferkugel', amount: n });
+    }
   }
 
   return { pocket, bets: results, lines, stake, sum, mult, payout, marks, anyWin, growth, nearMiss };

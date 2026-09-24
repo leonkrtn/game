@@ -668,3 +668,28 @@ export function buildUpgradeBox(color: string): Figurine {
   g.add(mesh(new THREE.BoxGeometry(0.008, 0.036, 0.052), std(new THREE.Color(color).getHex(), 0.4, 0.3), 0, 0.018, 0));
   return { group: g, height: 0.05 };
 }
+
+/** Turns a figurine into its golden version: gilded materials and a halo ring on the plate. */
+export function goldify(fig: Figurine): void {
+  const gold = new THREE.Color(0xffc640);
+  fig.group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const mats = Array.isArray(m.material) ? m.material : [m.material];
+    const next = mats.map((mat) => {
+      const c = (mat as THREE.MeshStandardMaterial).clone();
+      if (c.color) c.color.lerp(gold, 0.7);
+      if ('metalness' in c) {
+        c.metalness = Math.max(c.metalness, 0.85);
+        c.roughness = Math.min(c.roughness, 0.3);
+        c.emissive?.lerp(new THREE.Color(0x3a2200), 0.6);
+      }
+      return c;
+    });
+    m.material = Array.isArray(m.material) ? next : next[0];
+  });
+  const halo = new THREE.Mesh(new THREE.TorusGeometry(0.043, 0.0025, 8, 40), new THREE.MeshBasicMaterial({ color: 0xffd76a, toneMapped: false }));
+  halo.rotation.x = Math.PI / 2;
+  halo.position.y = 0.004;
+  fig.group.add(halo);
+}

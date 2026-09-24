@@ -102,12 +102,17 @@ export const VITRINE = { x: ROOM_X0 + 0.4, z: 0.6, halfW: 0.4, halfD: 1.1, heigh
 /** Red telephone on the right wall. */
 export const PHONE = { x: ROOM_X1 - 0.06, z: 1.6, y: 1.35 };
 export const DOOR = { x: -4.8, z: ROOM.z0 };
+/** Cigarette machine against the right wall, between the TV and the phone. */
+export const SMOKES = { x: ROOM_X1 - 0.3, z: -0.55, halfW: 0.25, halfD: 0.38 };
 
 /** Where the player stands to interact. */
 export const TABLE_SPOT = { x: TABLE.x + TABLE_LAYOUT.x, z: TABLE.z + TABLE.halfD + 0.45 };
 export const KASSE_SPOT = { x: KASSE.x, z: KASSE.z + KASSE.halfD + 0.55 };
 export const VITRINE_SPOT = { x: VITRINE.x + VITRINE.halfW + 0.6, z: VITRINE.z };
 export const PHONE_SPOT = { x: PHONE.x - 0.8, z: PHONE.z };
+export const SMOKES_SPOT = { x: SMOKES.x - 0.95, z: SMOKES.z };
+/** Where a rival stands at the table's far end during a duel, and where the loan shark stops. */
+export const RIVAL_SPOT = { x: TABLE.x + TABLE.halfW + 0.3, z: TABLE.z + 0.8 };
 
 /** Where talismans stand on the table, in table-local coordinates (behind the layout). */
 export function itemSlot(i: number, count: number): { x: number; z: number } {
@@ -127,5 +132,6 @@ export const OBSTACLES: Rect[] = [
   { x0: ROOM_X1 - 0.95, z0: -3.35, x1: ROOM_X1, z1: -2.45 },
   { x0: -6.45, z0: 3.35, x1: -4.15, z1: 5.1 },
   { x0: TABLE.x + TABLE.halfW + 0.2, z0: TABLE.z - 0.35, x1: TABLE.x + TABLE.halfW + 0.9, z1: TABLE.z + 0.55 },
+  { x0: SMOKES.x - SMOKES.halfW - 0.05, z0: SMOKES.z - SMOKES.halfD, x1: ROOM_X1, z1: SMOKES.z + SMOKES.halfD },
 ];
 
