@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
+/** Model file name: binary glTF normally, embedded glTF JSON in the single-file build (hosts that only serve web types). */
+export const modelFile = (name: string): string => name + (import.meta.env.MODE === 'single' ? '.gltf.json' : '.glb');
+
 
 /** Rigged people: a man in a suit (Ready Player Me), animated with Mixamo clips retargeted offline. */
 export interface HumanAssets {
@@ -46,8 +49,8 @@ export async function loadHumanAssets(base: string): Promise<HumanAssets> {
     }));
   };
   // Sequential on purpose: some browsers fail to decode many embedded textures at once.
-  const man = await load('man.glb');
-  const sunglasses = await load('sunglasses.glb').catch(() => undefined);
+  const man = await load(modelFile('man'));
+  const sunglasses = await load(modelFile('sunglasses')).catch(() => undefined);
   const manClips = await clipsOf('man');
   return { man, sunglasses, clips: { man: manClips } };
 }

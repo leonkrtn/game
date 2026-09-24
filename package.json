@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:single": "vite build --mode single",
+    "build:single": "vite build --mode single && node scripts/embed-gltf.mjs dist-single/assets",
     "preview": "vite preview",
     "test": "vitest run tests",
     "typecheck": "tsc --noEmit",

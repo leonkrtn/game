@@ -10,7 +10,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { CHIP_COLORS, POCKET_MOD_INFO, type PocketToolId } from '../game/content';
 import { FIELDS } from '../game/fields';
 import type { ItemInstance, Pocket, ShopItem } from '../game/types';
-import { Human, loadHumanAssets, type HumanAssets, type HumanStyle } from './humans';
+import { Human, loadHumanAssets, modelFile, type HumanAssets, type HumanStyle } from './humans';
 import { buildFigurine, buildUpgradeBox, registerModelFigurine, type Figurine } from './items3d';
 import {
   DOOR, FIELD_RECTS, fieldAt, fieldCenter, itemSlot, KASSE, KASSE_SPOT, LAYOUT_BOUNDS, OBSTACLES, PHONE, PHONE_SPOT, ROOM,
@@ -157,8 +157,8 @@ export class World {
     onProgress?.('LADE BAND … MÖBEL');
     const loader = new GLTFLoader();
     const opt = (f: string) => loader.loadAsync(base + f).catch(() => undefined) as Promise<GLTF | undefined>;
-    const chair = await opt('chair.glb');
-    const candle = await opt('candle.glb');
+    const chair = await opt(modelFile('chair'));
+    const candle = await opt(modelFile('candle'));
     onProgress?.('LADE BAND … CASINO');
     this.casino = buildCasino(this.scene, base, chair, candle);
     this.buildTable(base);
