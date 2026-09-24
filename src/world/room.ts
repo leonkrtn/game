@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DOOR, KASSE, PHONE, ROOM, SMOKES, TABLE, VITRINE } from './layout';
 import { carpet, ceiling, damask, marble, smudges, wood, woodBump } from './materials';
 
@@ -695,31 +694,143 @@ function smokeTexture(): THREE.CanvasTexture {
 
 let smokeTex: THREE.CanvasTexture | undefined;
 
+/** One puff or haze patch: a soft round billboard. */
+interface Puff {
+  pos: THREE.Vector3;
+  scale: number;
+  alpha: number;
+  color: THREE.Color;
+}
+
+/**
+ * All smoke and haze in a scene, drawn as one instanced mesh of camera-facing quads: the same look
+ * as individual sprites, but one draw call and no objects created per puff.
+ */
+class SmokeLayer {
+  readonly puffs: Puff[] = [];
+  private mesh: THREE.Mesh;
+  private geo: THREE.InstancedBufferGeometry;
+  private cap = 0;
+  private lastFrame = -1;
+
+  constructor(scene: THREE.Scene) {
+    smokeTex ??= smokeTexture();
+    this.geo = new THREE.InstancedBufferGeometry();
+    const quad = new THREE.PlaneGeometry(1, 1);
+    this.geo.index = quad.index;
+    this.geo.setAttribute('position', quad.getAttribute('position'));
+    this.geo.setAttribute('uv', quad.getAttribute('uv'));
+    this.grow(128);
+    const mat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { map: { value: null } }]),
+      vertexShader: /* glsl */ `
+        attribute vec3 iPos;
+        attribute float iScale;
+        attribute float iAlpha;
+        attribute vec3 iColor;
+        varying vec2 vUv;
+        varying float vAlpha;
+        varying vec3 vColor;
+        #include <fog_pars_vertex>
+        void main() {
+          vUv = uv;
+          vAlpha = iAlpha;
+          vColor = iColor;
+          vec4 mvPosition = modelViewMatrix * vec4(iPos, 1.0);
+          mvPosition.xy += position.xy * iScale;
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        uniform sampler2D map;
+        varying vec2 vUv;
+        varying float vAlpha;
+        varying vec3 vColor;
+        #include <fog_pars_fragment>
+        void main() {
+          vec4 t = texture2D(map, vUv);
+          gl_FragColor = vec4(vColor * t.rgb, t.a * vAlpha);
+          #include <fog_fragment>
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      fog: true,
+    });
+    mat.uniforms.map.value = smokeTex;
+    this.mesh = new THREE.Mesh(this.geo, mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 4;
+    // Upload the puffs right before drawing, once per frame.
+    this.mesh.onBeforeRender = (renderer) => {
+      const f = renderer.info.render.frame;
+      if (f === this.lastFrame) return;
+      this.lastFrame = f;
+      this.upload();
+    };
+    scene.add(this.mesh);
+  }
+
+  private grow(n: number): void {
+    this.cap = n;
+    this.geo.setAttribute('iPos', new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    this.geo.setAttribute('iScale', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
+    this.geo.setAttribute('iAlpha', new THREE.InstancedBufferAttribute(new Float32Array(n), 1).setUsage(THREE.DynamicDrawUsage));
+    this.geo.setAttribute('iColor', new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3).setUsage(THREE.DynamicDrawUsage));
+  }
+
+  private upload(): void {
+    const n = this.puffs.length;
+    if (n > this.cap) this.grow(Math.max(n, this.cap * 2));
+    const pos = this.geo.getAttribute('iPos') as THREE.InstancedBufferAttribute;
+    const sc = this.geo.getAttribute('iScale') as THREE.InstancedBufferAttribute;
+    const al = this.geo.getAttribute('iAlpha') as THREE.InstancedBufferAttribute;
+    const co = this.geo.getAttribute('iColor') as THREE.InstancedBufferAttribute;
+    for (let i = 0; i < n; i++) {
+      const p = this.puffs[i];
+      pos.setXYZ(i, p.pos.x, p.pos.y, p.pos.z);
+      sc.setX(i, p.scale);
+      al.setX(i, p.alpha);
+      co.setXYZ(i, p.color.r, p.color.g, p.color.b);
+    }
+    for (const a of [pos, sc, al, co]) a.needsUpdate = true;
+    this.geo.instanceCount = n;
+  }
+}
+
+const layers = new WeakMap<THREE.Scene, SmokeLayer>();
+const layerOf = (scene: THREE.Scene) => {
+  let l = layers.get(scene);
+  if (!l) layers.set(scene, (l = new SmokeLayer(scene)));
+  return l;
+};
+
 /** Cigarette smoke curling up from a point. */
 export function smoke(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[], at: THREE.Vector3, rate = 3): void {
-  smokeTex ??= smokeTexture();
-  const puffs: { s: THREE.Sprite; life: number; vx: number }[] = [];
+  const layer = layerOf(scene);
+  const color = new THREE.Color(0xb8b0a8);
+  const puffs: { p: Puff; life: number; vx: number }[] = [];
   let acc = 0;
   updates.push((dt, t) => {
     acc += dt * rate;
     while (acc > 1) {
       acc--;
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, color: 0xb8b0a8, transparent: true, opacity: 0, depthWrite: false }));
-      s.position.copy(at);
-      s.scale.setScalar(0.03);
-      scene.add(s);
-      puffs.push({ s, life: 0, vx: (Math.random() - 0.5) * 0.05 });
+      const p: Puff = { pos: at.clone(), scale: 0.03, alpha: 0, color };
+      layer.puffs.push(p);
+      puffs.push({ p, life: 0, vx: (Math.random() - 0.5) * 0.05 });
     }
-    for (const p of [...puffs]) {
-      p.life += dt;
-      const k = p.life / 5;
-      p.s.position.y += dt * 0.12;
-      p.s.position.x += dt * (p.vx + Math.sin(t * 1.3 + p.life * 2) * 0.03);
-      p.s.scale.setScalar(0.03 + k * 0.5);
-      (p.s.material as THREE.SpriteMaterial).opacity = Math.sin(Math.min(1, k) * Math.PI) * 0.22;
+    for (let i = puffs.length - 1; i >= 0; i--) {
+      const q = puffs[i];
+      q.life += dt;
+      const k = q.life / 5;
+      q.p.pos.y += dt * 0.12;
+      q.p.pos.x += dt * (q.vx + Math.sin(t * 1.3 + q.life * 2) * 0.03);
+      q.p.scale = 0.03 + k * 0.5;
+      q.p.alpha = Math.sin(Math.min(1, k) * Math.PI) * 0.22;
       if (k >= 1) {
-        scene.remove(p.s);
-        puffs.splice(puffs.indexOf(p), 1);
+        layer.puffs.splice(layer.puffs.indexOf(q.p), 1);
+        puffs.splice(i, 1);
       }
     }
   });
@@ -727,21 +838,19 @@ export function smoke(scene: THREE.Scene, updates: ((dt: number, t: number) => v
 
 /** A thin layer of smoke hanging under the ceiling. */
 function haze(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[]): void {
-  smokeTex ??= smokeTexture();
-  const sprites: THREE.Sprite[] = [];
+  const layer = layerOf(scene);
+  const color = new THREE.Color(0x8a7a70);
+  const patches: { p: Puff; base: THREE.Vector3 }[] = [];
   for (let i = 0; i < 26; i++) {
-    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: smokeTex, color: 0x8a7a70, transparent: true, opacity: 0.06, depthWrite: false }));
-    s.position.set(ROOM.x0 + Math.random() * (ROOM.x1 - ROOM.x0), 2.3 + Math.random() * 0.9, ROOM.z0 + Math.random() * (ROOM.z1 - ROOM.z0));
-    s.scale.setScalar(2.5 + Math.random() * 2.5);
-    s.userData.base = s.position.clone();
-    scene.add(s);
-    sprites.push(s);
+    const base = new THREE.Vector3(ROOM.x0 + Math.random() * (ROOM.x1 - ROOM.x0), 2.3 + Math.random() * 0.9, ROOM.z0 + Math.random() * (ROOM.z1 - ROOM.z0));
+    const p: Puff = { pos: base.clone(), scale: 2.5 + Math.random() * 2.5, alpha: 0.06, color };
+    layer.puffs.push(p);
+    patches.push({ p, base });
   }
   updates.push((_dt, t) => {
-    sprites.forEach((s, i) => {
-      const b = s.userData.base as THREE.Vector3;
-      s.position.x = b.x + Math.sin(t * 0.05 + i) * 0.6;
-      s.position.z = b.z + Math.cos(t * 0.04 + i * 1.7) * 0.4;
+    patches.forEach(({ p, base }, i) => {
+      p.pos.x = base.x + Math.sin(t * 0.05 + i) * 0.6;
+      p.pos.z = base.z + Math.cos(t * 0.04 + i * 1.7) * 0.4;
     });
   });
 }
@@ -824,43 +933,3 @@ function dust(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[], 
   });
 }
 
-/**
- * Merges the room's static meshes that share a material into one mesh each, so the GPU gets a
- * few dozen draw calls instead of hundreds. Anything under `keep` (moving or animated parts) stays.
- */
-export function mergeStatic(roots: THREE.Object3D[], keep: THREE.Object3D[]): number {
-  const skip = new Set<THREE.Object3D>();
-  for (const k of keep) k.traverse((o) => skip.add(o));
-  const groups = new Map<string, { mat: THREE.Material; cast: boolean; receive: boolean; items: THREE.Mesh[] }>();
-  for (const root of roots) {
-    root.updateMatrixWorld(true);
-    root.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (!m.isMesh || skip.has(m) || (m as unknown as THREE.InstancedMesh).isInstancedMesh || Array.isArray(m.material) || !m.visible) return;
-      const g = m.geometry;
-      const attrs = Object.keys(g.attributes).sort().join(',');
-      const key = `${m.material.uuid}|${m.castShadow}|${m.receiveShadow}|${g.index ? 'i' : 'n'}|${attrs}|${m.renderOrder}`;
-      let e = groups.get(key);
-      if (!e) groups.set(key, (e = { mat: m.material, cast: m.castShadow, receive: m.receiveShadow, items: [] }));
-      e.items.push(m);
-    });
-  }
-  let removed = 0;
-  const scene = roots[0]?.parent;
-  if (!scene) return 0;
-  for (const e of groups.values()) {
-    if (e.items.length < 2) continue;
-    const geos = e.items.map((m) => m.geometry.clone().applyMatrix4(m.matrixWorld));
-    const merged = mergeGeometries(geos, false);
-    geos.forEach((g) => g.dispose());
-    if (!merged) continue;
-    const mesh = new THREE.Mesh(merged, e.mat);
-    mesh.castShadow = e.cast;
-    mesh.receiveShadow = e.receive;
-    mesh.matrixAutoUpdate = false;
-    scene.add(mesh);
-    for (const m of e.items) m.parent?.remove(m);
-    removed += e.items.length - 1;
-  }
-  return removed;
-}

@@ -180,6 +180,7 @@ export class Game {
   /** Pushes run state that the 3D scene shows: talismans, showcase, wheel, marquee, phone. */
   private syncWorld(): void {
     const r = this.run;
+    this.chanceCache = undefined;
     this.world.setItems(r.items, r.perks.slots);
     this.world.setShowcase(r.shop);
     this.world.refreshWheel(r.wheel, undefined, r.visions);
@@ -794,7 +795,10 @@ export class Game {
 
   // ---- Rendering ------------------------------------------------------------------
 
+  private chanceCache?: number[];
+
   private renderTable(): void {
+    this.chanceCache = undefined;
     if (this.mode !== 'table' && this.mode !== 'spinning') return;
     renderTableBar(this.run, this.chip, {
       chip: (v) => this.selectChip(v),
@@ -951,7 +955,9 @@ export class Game {
       this.world.hoverCells = new Set(field ? coveredCells(this.run, field) : []);
     }
     this.world.setGhost(this.chip <= this.run.cash ? this.chip : undefined, field);
-    renderFieldInfo(this.run, field, this.mouse.x, this.mouse.y - 14);
+    // Odds only change when the table changes (renderTable clears this), not every frame.
+    this.chanceCache ??= this.run.finalChances();
+    renderFieldInfo(this.run, field, this.mouse.x, this.mouse.y - 14, this.chanceCache);
     if (!field) this.hoverItems();
     else $('itemtip').classList.add('hidden');
 

@@ -17,7 +17,8 @@ import {
   SMOKES, SMOKES_SPOT, TABLE, TABLE_LAYOUT, TABLE_SPOT, TABLE_WHEEL, VITRINE, VITRINE_SPOT,
 } from './layout';
 import { feltNormal, leather, smudges, wood } from './materials';
-import { buildCasino, mergeStatic, smoke, type Casino } from './room';
+import { mergeStatic } from './merge';
+import { buildCasino, smoke, type Casino } from './room';
 import { boardTexture, BOARD_SIZE, chipSideTexture, chipTexture } from './textures';
 import { faceEllipses, MAX_FACES, VhsShader } from './vhs';
 import { Wheel3D } from './wheel3d';
@@ -435,6 +436,8 @@ export class World {
     this.tableGroup.position.set(T.x, T.height, T.z);
     this.scene.add(this.tableGroup);
 
+    // The table's wood, leather, brass and the croupier's chip rack never move: one draw call per material.
+    mergeStatic([table, rack], [], this.scene);
     const s = TABLE_WHEEL.scale;
     this.wheel.group.scale.setScalar(s);
     this.wheel.group.position.set(T.x + TABLE_WHEEL.x, T.height - 0.9 * s + 0.004, T.z + TABLE_WHEEL.z);
@@ -1052,23 +1055,26 @@ export class World {
 
   update(dt: number): void {
     this.time += dt;
-    for (const tw of [...this.tweens]) {
+    for (let i = this.tweens.length - 1; i >= 0; i--) {
+      const tw = this.tweens[i];
       tw.t += dt;
       const u = Math.min(1, tw.t / tw.dur);
       tw.step(u);
       if (u >= 1) {
-        this.tweens.splice(this.tweens.indexOf(tw), 1);
+        const at = this.tweens.indexOf(tw);
+        if (at >= 0) this.tweens.splice(at, 1);
         tw.done?.();
       }
     }
-    for (const s of [...this.sparks]) {
+    for (let i = this.sparks.length - 1; i >= 0; i--) {
+      const s = this.sparks[i];
       s.life -= dt;
       s.vel.y -= 1.2 * dt * s.mesh.scale.x;
       s.mesh.position.addScaledVector(s.vel, dt);
       s.mesh.rotation.x += dt * 8;
       if (s.life <= 0) {
         this.scene.remove(s.mesh);
-        this.sparks.splice(this.sparks.indexOf(s), 1);
+        this.sparks.splice(i, 1);
       }
     }
     for (const f of [...this.falling]) {
@@ -1162,7 +1168,8 @@ export class World {
   }
 
   private updateFaces(): void {
-    const heads: THREE.Vector3[] = [];
+    const heads = this.heads;
+    heads.length = 0;
     let i = 0;
     for (const h of this.people) {
       if (!h.group.visible || i >= this.faceBuf.length) continue;
@@ -1172,10 +1179,15 @@ export class World {
     this.vhs.uniforms.faceCount.value = faceEllipses(this.camera, heads, faces);
   }
 
+  private readonly tmpPos = new THREE.Vector3();
+  private readonly tmpLook = new THREE.Vector3();
+  private readonly tmpWorld = new THREE.Vector3();
+  private readonly heads: THREE.Vector3[] = [];
+
   private updateCamera(dt: number): void {
     const p = this.player.group.position;
-    const pos = new THREE.Vector3();
-    const look = new THREE.Vector3();
+    const pos = this.tmpPos.set(0, 0, 0);
+    const look = this.tmpLook.set(0, 0, 0);
     const L = this.layout.position;
     const W = this.wheel.group.position;
     let rate = 3.5;
@@ -1257,7 +1269,7 @@ export class World {
     // Fade the table lamp when it hangs between the camera and the player.
     for (const o of this.casino.occluders) {
       const mat = o.material as THREE.MeshStandardMaterial;
-      const wp = o.getWorldPosition(new THREE.Vector3());
+      const wp = o.getWorldPosition(this.tmpWorld);
       const blocking = this.cameraMode === 'room' && wp.y < this.camera.position.y + 0.3 && Math.abs(wp.z - this.camera.position.z) < 3.5 && wp.distanceTo(this.camera.position) < 3.2;
       mat.transparent = true;
       mat.opacity += ((blocking ? 0.2 : 1) - mat.opacity) * Math.min(1, dt * 6);

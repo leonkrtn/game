@@ -197,6 +197,26 @@ export class Human {
   update(dt: number): void {
     this.mixer.update(dt);
     this.group.rotation.y = this.heading;
+    if (!this.cullReady) this.enableCulling();
+  }
+
+  private cullReady = false;
+
+  /**
+   * Skinned meshes are drawn even off screen unless they have a bounding sphere. Take one from the
+   * first posed frame and make it half again as big, so walking and gestures never pop out of view.
+   */
+  private enableCulling(): void {
+    this.cullReady = true;
+    this.group.updateMatrixWorld(true);
+    this.model.traverse((o) => {
+      const m = o as THREE.SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      m.computeBoundingSphere();
+      if (!m.boundingSphere) return;
+      m.boundingSphere.radius = Math.max(m.boundingSphere.radius * 1.5, 0.35);
+      m.frustumCulled = true;
+    });
   }
 
   /** World position of the face, for pixelating it on screen. */

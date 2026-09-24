@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeStatic } from './merge';
 import type { Pocket } from '../game/types';
 import { POCKET_COUNT } from '../game/wheel';
 import { drawWheelTexture, pocketAngle, WHEEL_RADII } from './textures';
@@ -123,6 +124,9 @@ export class Wheel3D {
       m.receiveShadow = true;
     }
     this.group.add(pedestal, bowl, trackRing, this.rotor, this.ball);
+    // Separators, arms and deflectors are the same brass: merge them (the rotor turns as one piece).
+    mergeStatic([this.rotor], [], this.rotor);
+    mergeStatic([this.group], [this.rotor, this.ball], this.group);
   }
 
   get spinning(): boolean {

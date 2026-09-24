@@ -127,6 +127,11 @@ export const VhsShader = {
   `,
 };
 
+const _right = new THREE.Vector3();
+const _tmp = new THREE.Vector3();
+const _edge = new THREE.Vector3();
+const _cam = new THREE.Vector3();
+
 /** Projects people's faces to screen ellipses for the censor effect. */
 export function faceEllipses(
   camera: THREE.PerspectiveCamera,
@@ -134,10 +139,10 @@ export function faceEllipses(
   out: THREE.Vector4[],
 ): number {
   let n = 0;
-  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
-  const tmp = new THREE.Vector3();
-  const edge = new THREE.Vector3();
-  const camPos = camera.getWorldPosition(new THREE.Vector3());
+  const right = _right.setFromMatrixColumn(camera.matrixWorld, 0);
+  const tmp = _tmp;
+  const edge = _edge;
+  const camPos = camera.getWorldPosition(_cam);
   for (const h of heads) {
     if (n >= out.length) break;
     tmp.copy(h).project(camera);

@@ -253,18 +253,28 @@ export function renderSlip(run: Run, show: boolean): void {
   box.replaceChildren(...rows);
 }
 
-export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number, y: number): void {
+let lastFieldKey = '';
+let lastFieldChances: number[] | undefined;
+
+export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number, y: number, chances?: number[]): void {
   const box = $('fieldinfo');
   if (!fieldId) {
     box.classList.add('hidden');
     return;
   }
+  // Same field, same odds: only move the box instead of rebuilding it every frame.
+  const key = `${fieldId}|${run.stakeTotal}|${chances ? chances.length : 0}`;
+  box.style.left = `${x}px`;
+  box.style.top = `${y}px`;
+  if (key === lastFieldKey && lastFieldChances === chances && !box.classList.contains('hidden')) return;
+  lastFieldKey = key;
+  lastFieldChances = chances;
   const f = FIELD_BY_ID[fieldId];
   const payout = f.kind === 'straight' && run.activeRule === 'halbzahl' ? 18 : f.payout;
   const stake = (run.bets[fieldId] ?? []).reduce((a, b) => a + b, 0);
   box.replaceChildren(
     h('b', { text: f.kind === 'straight' ? `PLEIN ${f.label}` : f.numbers.length ? `${KIND_NAME[f.kind]} ${f.label}` : f.label }),
-    h('div', { text: `QUOTE ${payout - 1}:1 (×${payout} ZURÜCK) · CHANCE ${pct(fieldChance(run, fieldId))}${run.cubeField === fieldId ? ' · VERDREHT ×3' : ''}` }),
+    h('div', { text: `QUOTE ${payout - 1}:1 (×${payout} ZURÜCK) · CHANCE ${pct(fieldChance(run, fieldId, chances))}${run.cubeField === fieldId ? ' · VERDREHT ×3' : ''}` }),
   );
   if (stake) box.append(h('div', { text: `GESETZT ${fmt(stake)} · RECHTSKLICK ZURÜCK` }));
   box.style.left = `${x}px`;
