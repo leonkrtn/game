@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 /** A talisman figurine as it stands on the table. Sizes are in meters (about 6–12 cm tall). */
 export interface Figurine {
@@ -35,10 +36,11 @@ const M = {
   velvet: std(0x7a0e1e, 0.95),
 };
 
-function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {
+function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0, cast = true): THREE.Mesh {
   const m = new THREE.Mesh(geo, mat);
   m.position.set(x, y, z);
-  m.castShadow = true;
+  m.castShadow = cast;
+  m.receiveShadow = true;
   return m;
 }
 
@@ -87,6 +89,18 @@ function clockTexture(): THREE.CanvasTexture {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+function canvasTex(w: number, h: number, draw: (g: CanvasRenderingContext2D) => void): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d')!);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+const rbox = (w: number, h: number, d: number, r: number) => new RoundedBoxGeometry(w, h, d, 3, r);
 
 type Builder = () => Figurine;
 
@@ -416,7 +430,229 @@ const BUILDERS: Record<string, Builder> = {
   },
 };
 
+Object.assign(BUILDERS, {
+  walkman(): Figurine {
+    const g = new THREE.Group();
+    const body = mesh(rbox(0.058, 0.084, 0.022, 0.004), std(0x2a4a8a, 0.35, 0.6), 0, 0.042, 0);
+    const window = mesh(new THREE.PlaneGeometry(0.04, 0.026), std(0x101014, 0.1, 0, { transparent: true, opacity: 0.8 }), 0, 0.05, 0.0115);
+    const label = mesh(new THREE.PlaneGeometry(0.046, 0.012), new THREE.MeshStandardMaterial({ map: canvasTex(128, 32, (c) => {
+      c.fillStyle = '#d8d8dc';
+      c.fillRect(0, 0, 128, 32);
+      c.fillStyle = '#1a1a1a';
+      c.font = '700 20px Arial Narrow, Arial, sans-serif';
+      c.fillText('WALKMAN', 10, 23);
+    }), roughness: 0.4 }), 0, 0.074, 0.0115);
+    const band = mesh(new THREE.TorusGeometry(0.035, 0.0025, 8, 24, Math.PI), M.silver, 0, 0.09, -0.005);
+    g.add(body, window, label, band);
+    for (const x of [-0.035, 0.035]) {
+      const pad = mesh(new THREE.SphereGeometry(0.013, 14, 10), std(0xff6a1a, 0.95), x, 0.088, -0.005);
+      pad.scale.set(0.6, 1, 1);
+      g.add(pad);
+    }
+    for (const x of [-0.012, 0.012]) g.add(mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.003, 12), M.white, x, 0.05, 0.012).rotateX(Math.PI / 2));
+    return { group: g, height: 0.11 };
+  },
+  pager(): Figurine {
+    const g = new THREE.Group();
+    const body = mesh(rbox(0.05, 0.034, 0.016, 0.005), std(0x121214, 0.5), 0, 0.017, 0);
+    body.rotation.x = -0.9;
+    body.position.set(0, 0.018, 0);
+    const lcd = mesh(new THREE.PlaneGeometry(0.034, 0.012), new THREE.MeshStandardMaterial({ map: canvasTex(128, 48, (c) => {
+      c.fillStyle = '#6a8a4a';
+      c.fillRect(0, 0, 128, 48);
+      c.fillStyle = '#1a2a10';
+      c.font = '700 34px monospace';
+      c.fillText('07734', 8, 36);
+    }), emissive: 0x3a5a2a, emissiveIntensity: 0.6, roughness: 0.3 }), 0, 0.0081, 0.004);
+    body.add(lcd);
+    lcd.position.set(0, 0.004, 0.0081);
+    lcd.rotation.set(0, 0, 0);
+    g.add(body);
+    return { group: g, height: 0.05, animate: (t) => ((lcd.material as THREE.MeshStandardMaterial).emissiveIntensity = Math.sin(t * 6) > 0.6 ? 1.4 : 0.5) };
+  },
+  zippo(): Figurine {
+    const g = new THREE.Group();
+    const body = mesh(rbox(0.022, 0.034, 0.013, 0.003), M.silver, 0, 0.017, 0);
+    const lidPivot = new THREE.Group();
+    lidPivot.position.set(0.011, 0.034, 0);
+    const lid = mesh(rbox(0.022, 0.014, 0.013, 0.003), M.silver, -0.011, 0.007, 0);
+    lidPivot.add(lid);
+    lidPivot.rotation.z = -2.2;
+    const chimney = mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.01, 12, 1, true), M.silver, 0, 0.039, 0);
+    const flame = mesh(new THREE.ConeGeometry(0.0045, 0.02, 10), glow(0xffa030, 3), 0, 0.054, 0);
+    flame.castShadow = false;
+    g.add(body, lidPivot, chimney, flame);
+    return { group: g, height: 0.07, animate: (t) => flame.scale.set(1, 0.8 + Math.sin(t * 19) * 0.12 + Math.sin(t * 5.1) * 0.1, 1) };
+  },
+  hasenpfote(): Figurine {
+    const g = new THREE.Group();
+    const fur = mesh(new THREE.CapsuleGeometry(0.011, 0.03, 8, 14), std(0xe8dcc8, 1), 0, 0.03, 0);
+    fur.rotation.z = 0.35;
+    const cap = mesh(new THREE.CylinderGeometry(0.009, 0.011, 0.012, 16), M.gold, -0.008, 0.055, 0);
+    cap.rotation.z = 0.35;
+    const ring = mesh(new THREE.TorusGeometry(0.009, 0.0016, 8, 20), M.gold, -0.013, 0.069, 0);
+    g.add(fur, cap, ring);
+    for (let i = 0; i < 5; i++) {
+      const tuft = mesh(new THREE.SphereGeometry(0.006, 8, 6), std(0xf2e8d8, 1), 0.004 + Math.sin(i) * 0.006, 0.012 + i * 0.006, Math.cos(i * 2) * 0.007);
+      g.add(tuft);
+    }
+    return { group: g, height: 0.08 };
+  },
+  kassette(): Figurine {
+    const g = new THREE.Group();
+    const tape = new THREE.Group();
+    tape.add(mesh(rbox(0.064, 0.041, 0.009, 0.002), std(0x1a1a1c, 0.4), 0, 0, 0));
+    const label = mesh(new THREE.PlaneGeometry(0.056, 0.024), new THREE.MeshStandardMaterial({ map: canvasTex(224, 96, (c) => {
+      c.fillStyle = '#f2ead6';
+      c.fillRect(0, 0, 224, 96);
+      c.fillStyle = '#e04a2a';
+      c.fillRect(0, 0, 224, 18);
+      c.fillStyle = '#20206a';
+      c.font = 'italic 700 26px Georgia, serif';
+      c.fillText("Mixtape '86", 16, 56);
+      c.fillStyle = '#1a1a1a';
+      c.beginPath();
+      c.roundRect(62, 64, 100, 26, 12);
+      c.fill();
+    }), roughness: 0.7 }), 0, 0.003, 0.0046);
+    tape.add(label);
+    for (const x of [-0.016, 0.016]) tape.add(mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.0095, 12), M.white, x, -0.003, 0).rotateX(Math.PI / 2));
+    tape.rotation.x = -0.35;
+    tape.position.set(0, 0.022, 0);
+    g.add(tape, mesh(new THREE.BoxGeometry(0.07, 0.004, 0.02), M.darkWood, 0, 0.002, -0.008));
+    return { group: g, height: 0.05 };
+  },
+  zauberwuerfel(): Figurine {
+    const g = new THREE.Group();
+    const colors = [0xffffff, 0xffd200, 0xc8102e, 0xff6a00, 0x0051ba, 0x009e60];
+    const cube = new THREE.Group();
+    const s = 0.013;
+    const layers: THREE.Group[] = [new THREE.Group(), new THREE.Group(), new THREE.Group()];
+    for (let x = -1; x <= 1; x++) for (let y = -1; y <= 1; y++) for (let z = -1; z <= 1; z++) {
+      const cubie = new THREE.Group();
+      cubie.position.set(x * s, y * s, z * s);
+      cubie.add(mesh(rbox(s * 0.98, s * 0.98, s * 0.98, 0.0015), std(0x0a0a0a, 0.5), 0, 0, 0));
+      const faces: [number, THREE.Vector3, THREE.Euler][] = [
+        [x === 1 ? 2 : -1, new THREE.Vector3(s * 0.5, 0, 0), new THREE.Euler(0, Math.PI / 2, 0)],
+        [x === -1 ? 3 : -1, new THREE.Vector3(-s * 0.5, 0, 0), new THREE.Euler(0, -Math.PI / 2, 0)],
+        [y === 1 ? 0 : -1, new THREE.Vector3(0, s * 0.5, 0), new THREE.Euler(-Math.PI / 2, 0, 0)],
+        [y === -1 ? 1 : -1, new THREE.Vector3(0, -s * 0.5, 0), new THREE.Euler(Math.PI / 2, 0, 0)],
+        [z === 1 ? 5 : -1, new THREE.Vector3(0, 0, s * 0.5), new THREE.Euler(0, 0, 0)],
+        [z === -1 ? 4 : -1, new THREE.Vector3(0, 0, -s * 0.5), new THREE.Euler(0, Math.PI, 0)],
+      ];
+      for (const [c, p, r] of faces) {
+        if (c < 0) continue;
+        const st = mesh(new THREE.PlaneGeometry(s * 0.82, s * 0.82), std(colors[c], 0.3), p.x * 1.02, p.y * 1.02, p.z * 1.02, false);
+        st.rotation.copy(r);
+        cubie.add(st);
+      }
+      layers[y + 1].add(cubie);
+    }
+    cube.add(...layers);
+    layers[2].rotation.y = 0.35;
+    cube.position.y = 0.021;
+    cube.rotation.y = 0.5;
+    g.add(cube);
+    return { group: g, height: 0.045, animate: (t) => (layers[2].rotation.y = 0.35 + Math.sin(t * 0.8) * 0.3) };
+  },
+  polaroid(): Figurine {
+    const g = new THREE.Group();
+    g.add(mesh(rbox(0.07, 0.04, 0.05, 0.006), std(0xf4f0e8, 0.45), 0, 0.02, 0));
+    g.add(mesh(rbox(0.07, 0.03, 0.035, 0.006), std(0x1a1a1a, 0.5), 0, 0.052, -0.006));
+    const stripe = mesh(new THREE.PlaneGeometry(0.012, 0.038), new THREE.MeshStandardMaterial({ map: canvasTex(16, 64, (c) => {
+      ['#e0302a', '#ff8a1a', '#ffd21a', '#3aa84a', '#2a6ad8'].forEach((col, i) => {
+        c.fillStyle = col;
+        c.fillRect(0, i * 13, 16, 13);
+      });
+    }) }), 0, 0.02, 0.0252);
+    const lens = mesh(new THREE.CylinderGeometry(0.012, 0.013, 0.012, 24), M.black, 0.018, 0.045, 0.012);
+    lens.rotation.x = Math.PI / 2;
+    const glass = mesh(new THREE.CircleGeometry(0.009, 24), std(0x2a3a5a, 0.02, 0.5), 0.018, 0.045, 0.0185);
+    const photo = mesh(new THREE.BoxGeometry(0.036, 0.0015, 0.042), M.white, 0, 0.0008, 0.05);
+    const img = mesh(new THREE.PlaneGeometry(0.03, 0.03), new THREE.MeshStandardMaterial({ map: canvasTex(64, 64, (c) => {
+      const grad = c.createLinearGradient(0, 0, 0, 64);
+      grad.addColorStop(0, '#3a2a4a');
+      grad.addColorStop(1, '#c86a3a');
+      c.fillStyle = grad;
+      c.fillRect(0, 0, 64, 64);
+      c.fillStyle = '#1a0a0a';
+      c.fillRect(24, 22, 16, 30);
+    }), roughness: 0.6 }), 0, 0.0017, 0.047, false);
+    img.rotation.x = -Math.PI / 2;
+    g.add(stripe, lens, glass, photo, img);
+    return { group: g, height: 0.07 };
+  },
+  voodoo(): Figurine {
+    const g = new THREE.Group();
+    const burlap = new THREE.MeshStandardMaterial({ map: canvasTex(64, 64, (c) => {
+      c.fillStyle = '#8a6a3a';
+      c.fillRect(0, 0, 64, 64);
+      c.strokeStyle = '#6a4a22';
+      for (let i = 0; i < 64; i += 4) {
+        c.beginPath();
+        c.moveTo(i, 0);
+        c.lineTo(i, 64);
+        c.moveTo(0, i);
+        c.lineTo(64, i);
+        c.stroke();
+      }
+    }), roughness: 1 });
+    const body = mesh(new THREE.CapsuleGeometry(0.012, 0.028, 6, 12), burlap, 0, 0.03, 0);
+    const head = mesh(new THREE.SphereGeometry(0.014, 14, 10), burlap, 0, 0.066, 0);
+    g.add(body, head);
+    for (const side of [-1, 1]) {
+      const arm = mesh(new THREE.CapsuleGeometry(0.004, 0.02, 4, 8), burlap, side * 0.018, 0.04, 0);
+      arm.rotation.z = side * 1.1;
+      const leg = mesh(new THREE.CapsuleGeometry(0.005, 0.016, 4, 8), burlap, side * 0.007, 0.008, 0);
+      g.add(arm, leg);
+      const eye = mesh(new THREE.CylinderGeometry(0.003, 0.003, 0.002, 10), M.black, side * 0.005, 0.068, 0.013);
+      eye.rotation.x = Math.PI / 2;
+      g.add(eye);
+    }
+    const pinColors = [0xff2020, 0x20a0ff, 0xffd020];
+    pinColors.forEach((c, i) => {
+      const pin = new THREE.Group();
+      pin.add(mesh(new THREE.CylinderGeometry(0.0006, 0.0006, 0.03), M.silver, 0, 0.015, 0));
+      pin.add(mesh(new THREE.SphereGeometry(0.0022, 8, 6), std(c, 0.3), 0, 0.03, 0));
+      pin.position.set(-0.006 + i * 0.006, 0.03 + i * 0.012, 0.008);
+      pin.rotation.set(0.8, 0, (i - 1) * 0.5);
+      g.add(pin);
+    });
+    return { group: g, height: 0.09, animate: (t) => (g.rotation.z = Math.sin(t * 0.9) * 0.05) };
+  },
+  goldkette(): Figurine {
+    const g = new THREE.Group();
+    const n = 26;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2;
+      const link = mesh(new THREE.TorusGeometry(0.0035, 0.0011, 6, 12), M.gold, Math.cos(a) * 0.03, 0.002, Math.sin(a) * 0.022);
+      link.rotation.set(Math.PI / 2, 0, a + (i % 2) * Math.PI / 2);
+      g.add(link);
+    }
+    const medal = mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.003, 24), M.gold, 0, 0.012, 0.028);
+    medal.rotation.x = 1.2;
+    const sign = mesh(new THREE.PlaneGeometry(0.014, 0.014), new THREE.MeshStandardMaterial({ map: canvasTex(64, 64, (c) => {
+      c.fillStyle = '#8a6a1a';
+      c.font = '700 54px Georgia, serif';
+      c.textAlign = 'center';
+      c.textBaseline = 'middle';
+      c.fillText('$', 32, 36);
+    }), transparent: true, metalness: 1, roughness: 0.3 }), 0, 0.0126, 0.0296, false);
+    sign.rotation.x = 1.2 - Math.PI / 2;
+    g.add(medal, sign);
+    return { group: g, height: 0.03 };
+  },
+});
+
+/** Figurines backed by real models, registered once they are loaded. */
+const MODEL_FIGURINES = new Map<string, () => Figurine>();
+export function registerModelFigurine(def: string, build: () => Figurine): void {
+  MODEL_FIGURINES.set(def, build);
+}
+
 export function buildFigurine(def: string): Figurine {
+  const model = MODEL_FIGURINES.get(def);
+  if (model) return model();
   const b = BUILDERS[def];
   if (b) return b();
   const g = new THREE.Group();

@@ -120,5 +120,12 @@ export const OBSTACLES: Rect[] = [
   { x0: TABLE.x - TABLE.halfW, z0: TABLE.z - TABLE.halfD, x1: TABLE.x + TABLE.halfW, z1: TABLE.z + TABLE.halfD },
   { x0: KASSE.x - KASSE.halfW, z0: ROOM.z0, x1: KASSE.x + KASSE.halfW, z1: KASSE.z + KASSE.halfD },
   { x0: ROOM.x0, z0: VITRINE.z - VITRINE.halfD, x1: VITRINE.x + VITRINE.halfW, z1: VITRINE.z + VITRINE.halfD },
+  // Slot machines, bar, jukebox, television, lounge and the chair at the table's end.
+  { x0: 0.45, z0: ROOM.z0, x1: 3.45, z1: ROOM.z0 + 0.85 },
+  { x0: ROOM_X1 - 2.05, z0: 2.75, x1: ROOM_X1, z1: 5.05 },
+  { x0: ROOM_X0, z0: -4.1, x1: ROOM_X0 + 0.85, z1: -3.1 },
+  { x0: ROOM_X1 - 0.95, z0: -3.35, x1: ROOM_X1, z1: -2.45 },
+  { x0: -6.45, z0: 3.35, x1: -4.15, z1: 5.1 },
+  { x0: TABLE.x + TABLE.halfW + 0.2, z0: TABLE.z - 0.35, x1: TABLE.x + TABLE.halfW + 0.9, z1: TABLE.z + 0.55 },
 ];
 

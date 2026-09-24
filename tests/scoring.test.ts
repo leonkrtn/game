@@ -53,6 +53,20 @@ describe('scoreSpin', () => {
     expect(scoreSpin(inp, idx(inp.wheel, 2)).payout).toBe(30);
   });
 
+  it('the pager pays near misses and the walkman rewards focus', () => {
+    const w = wheel();
+    // 32 sits next to 0 on the wheel.
+    const inp = input({ wheel: w, bets: { n32: [10] }, items: [item(1, 'pager'), item(2, 'walkman')] });
+    const r = scoreSpin(inp, idx(w, 0));
+    expect(r.sum).toBe(80);
+    expect(r.mult).toBe(2);
+  });
+
+  it('the polaroid and the magic cube multiply', () => {
+    const inp = input({ bets: { red: [10] }, items: [item(1, 'polaroid'), item(2, 'zauberwuerfel')], lastNumber: 1, cubeField: 'red' });
+    expect(scoreSpin(inp, idx(inp.wheel, 1)).mult).toBe(15);
+  });
+
   it('magnets and heavy pockets raise the weight', () => {
     const w = wheel();
     w[idx(w, 5)].mod = 'schwer';
@@ -93,6 +107,17 @@ describe('Run', () => {
     expect(run.marks).toBe(marks + 3 + early);
     expect(run.cycle).toBe(1);
     expect(run.offers.length).toBe(3);
+  });
+
+  it('debt stages make rates harder and the sunglasses ignore house rules', () => {
+    const easy = new Run({ seed: 1 });
+    const hard = new Run({ seed: 1, stage: 4 });
+    expect(hard.debt).toBeGreaterThan(easy.debt);
+    expect(hard.cycleRounds).toBe(easy.cycleRounds - 1);
+    hard.rule = 'limit';
+    expect(hard.activeRule).toBe('limit');
+    hard.items.push({ uid: 99, def: 'sonnenbrille', counter: 0 });
+    expect(hard.activeRule).toBeUndefined();
   });
 
   it('is game over when the rate cannot be paid', () => {

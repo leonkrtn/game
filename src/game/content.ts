@@ -44,6 +44,16 @@ export const ITEMS: Record<string, ItemDef> = Object.fromEntries([
   I('zigarre', 'Zigarre', 'rare', 'Setzt du mindestens die Hälfte deines Bargelds: ×1,5 Mult.'),
   I('fernglas', 'Opernglas', 'rare', 'Gewinnt ein Cheval, Carré, eine Transversale oder Sechserreihe: +2 Mult.'),
   I('spiegel', 'Handspiegel', 'rare', 'Kopiert die Wirkung des Talismans rechts daneben.'),
+  I('walkman', 'Walkman', 'common', 'Liegt dein ganzer Einsatz auf einem einzigen Feld: +1 Mult.'),
+  I('pager', 'Pager', 'common', 'Knapp daneben zählt: Pleins direkt neben der Kugel zahlen ×8.'),
+  I('zippo', 'Zippo', 'common', 'Nach zwei verlorenen Runden in Folge: ×2 Mult.'),
+  I('hasenpfote', 'Hasenpfote', 'common', 'Glück +1 für jeden freien Platz auf deinem Tisch.'),
+  I('kassette', 'Mixtape', 'common', 'Setzt du genau wie in der Runde davor: +1 Mult.'),
+  I('zauberwuerfel', 'Zauberwürfel', 'rare', 'Jede Runde ist ein Außenfeld verdreht (lila markiert). Gewinnt eine Wette darauf: ×3 Mult.'),
+  I('polaroid', 'Polaroid', 'rare', 'Fällt dieselbe Zahl wie in der Runde davor: ×5 Mult.'),
+  I('voodoo', 'Voodoo-Puppe', 'rare', 'Jede Rate ist 15 % niedriger. Aber jeder dritte Nachhopser springt gegen dich.'),
+  I('goldkette', 'Goldkettchen', 'rare', '+0,1 Mult pro $50 Bargeld vor dem Einsatz (höchstens +3).'),
+  I('sonnenbrille', 'Sonnenbrille', 'legendary', 'Hausregeln gelten für dich nicht.'),
   I('kristallkugel', 'Kristallkugel', 'legendary', 'Zeigt jede Runde 3 Fächer. Mit 40 % Chance landet die Kugel in einem davon.'),
   I('goldkugel', 'Goldene Kugel', 'legendary', 'Glück +3. Nachhopser können bis zu zwei Fächer weit springen.', 3),
   I('teufel', 'Teufelsfigur', 'legendary', '×2 Mult auf jeden Gewinn. Jede Rate ist 25 % höher.'),
@@ -137,6 +147,17 @@ export const START_KITS: Record<string, StartKit> = {
   bankier: { id: 'bankier', name: 'Bankier', desc: '$60 Bargeld, $60 schon eingezahlt und ein Sparschwein.', money: 60, marks: 2, deposit: 60, items: ['sparschwein'] },
   teufel: { id: 'teufel', name: 'Teufelspakt', desc: '$150 Bargeld und die Teufelsfigur. Alles doppelt – auch die Schulden.', money: 150, marks: 2, items: ['teufel'] },
 };
+
+// ---- Debt stages: the roguelike difficulty ladder ---------------------------------
+
+export const STAGES = [
+  { name: 'Kleiner Fisch', desc: 'Die normalen Regeln.' },
+  { name: 'Stammkunde', desc: 'Alle Raten sind 25 % höher.' },
+  { name: 'Schwarze Liste', desc: 'Alles in der Vitrine kostet eine Glücksmarke mehr.' },
+  { name: 'Blutgeld', desc: 'Die Zinsen auf Einzahlungen sind halbiert.' },
+  { name: 'Kurze Leine', desc: 'Jede Rate ist eine Runde früher fällig.' },
+  { name: 'Letzte Chance', desc: 'Du startest ohne Glücksmarken und mit Glück −1.' },
+];
 
 // ---- Money --------------------------------------------------------------------
 

@@ -21,7 +21,16 @@ falschen Leuten und versuchst in einem kleinen Casino am Roulettetisch genug Gel
 - **Glück:** Mit etwas Glück hüpft die Kugel noch in ein Nachbarfach, das dir mehr bringt.
 - **Das rote Telefon:** Nach jeder Rate ruft der Boss an und bietet dir einen von drei Deals an.
 - **Hausregeln:** Ab Rate 2 gilt je Zyklus eine Regel (Tischlimit, Roter Fluch, Zeitdruck …).
-- **Sammlung:** Erfolge schalten neue Talismane und Startausrüstungen frei (im Browser gespeichert).
+- **Schuldenstufen:** Wer alle 8 Raten zahlt, schaltet die nächste von sechs Stufen frei – jede
+  mit einer zusätzlichen Härte (höhere Raten, teurere Vitrine, halbe Zinsen, kürzere Frist …).
+- **Sammlung:** 26 Erfolge schalten neue Talismane und Startausrüstungen frei (im Browser gespeichert).
+
+## Look
+
+Oktober 1987, Überwachungsband: echte Rig-Figuren mit Mixamo-Animationen, PBR-Materialien,
+Ambient Occlusion und Bloom, darüber ein VHS-Shader (Chroma-Verschmierung, Tracking-Streifen,
+Kopfumschaltung, Rauschen). Gesichter werden wie auf zensiertem Bandmaterial verpixelt.
+Menüs und HUD sind im Stil eines Videorekorder-OSD gehalten.
 
 ## Steuerung
 
@@ -59,3 +68,12 @@ npm run build:single # alles in einer einzigen dist-single/index.html
 - `src/world/`: Three.js-Szene (Casino, Tisch, Rad, Figuren, Talisman-Figuren, Effekte)
 - `src/ui/`: HTML-Oberfläche (Seitenleiste, Jetons, Kasse, Vitrine, Telefon, Bildschirme)
 - `src/game.ts`: verbindet Logik, Welt und Oberfläche
+- `scripts/build-assets.mjs`, `scripts/retarget.mjs`: laden, komprimieren und retargeten die 3D-Assets
+  nach `public/assets/`
+
+## Assets & Lizenzen
+
+- Figur: Ready-Player-Me-Avatar aus den three.js-Beispielen; Animationen: Mixamo (über three.js `Xbot.glb`)
+- Khronos glTF Sample Assets (CC BY 4.0): ChairDamaskPurplegold, SunglassesKhronos, GlassHurricaneCandleHolder
+- Holztexturen: three.js-Beispiele (hardwood2)
+- Schrift: VT323 (SIL Open Font License)

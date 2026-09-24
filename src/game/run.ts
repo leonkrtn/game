@@ -24,6 +24,8 @@ export type RunPhase = 'betting' | 'spinning' | 'due' | 'gameover' | 'victory';
 export interface RunOptions {
   seed?: number;
   kit?: string;
+  /** Debt stage 0..5, the roguelike difficulty. */
+  stage?: number;
   /** Item ids that are not unlocked yet and never appear in the showcase. */
   locked?: Set<string>;
 }
@@ -43,11 +45,19 @@ export interface RunStats {
   maxItems: number;
   loansRepaid: number;
   earlyPays: number;
+  focusWins: number;
+  nearMisses: number;
+  repeats: number;
+  minCash: number;
+  hangups: number;
+  sameBetStreak: number;
+  bestSameBetStreak: number;
 }
 
 export class Run {
   readonly rng: Rng;
   readonly kitId: string;
+  readonly stage: number;
   phase: RunPhase = 'betting';
   /** Index of the current rate (0-based). */
   cycle = 0;
@@ -70,6 +80,8 @@ export class Run {
   offers: string[] = [];
   /** Pockets shown by the crystal ball this round. */
   visions: number[] = [];
+  /** Field twisted by the magic cube this round. */
+  cubeField?: string;
 
   wheel: Pocket[];
   items: ItemInstance[] = [];
@@ -85,6 +97,7 @@ export class Run {
   stats: RunStats = {
     spins: 0, bestWin: 0, totalWon: 0, maxMoney: 0, straightWins: 0, insideWins: 0, zeroHits: 0, hops: 0,
     lossStreak: 0, maxLossStreak: 0, renumbers: 0, maxItems: 0, loansRepaid: 0, earlyPays: 0,
+    focusWins: 0, nearMisses: 0, repeats: 0, minCash: Infinity, hangups: 0, sameBetStreak: 0, bestSameBetStreak: 0,
   };
   private locked: Set<string>;
   private uid = 1;
@@ -95,11 +108,13 @@ export class Run {
     this.locked = opts.locked ?? new Set();
     const kit = START_KITS[opts.kit ?? 'klassisch'] ?? START_KITS.klassisch;
     this.kitId = kit.id;
+    this.stage = Math.max(0, Math.min(5, opts.stage ?? 0));
     this.wheel = WHEEL_ORDER.map((n, index) => ({ index, number: n, color: standardColor(n) }));
     this.cash = kit.money;
     this.marks = kit.marks;
     this.deposit = kit.deposit ?? 0;
-    this.perks.luck = kit.luck ?? 0;
+    this.perks.luck = (kit.luck ?? 0) - (this.stage >= 5 ? 1 : 0);
+    if (this.stage >= 5) this.marks = 0;
     for (const id of kit.items ?? []) this.addItem(id);
     this.nextRule = this.rollRule();
     this.startCycle();
@@ -108,7 +123,7 @@ export class Run {
   // ---- Derived values ---------------------------------------------------
 
   get debt(): number {
-    const base = debtFor(this.cycle) * (this.has('teufel') ? 1.25 : 1);
+    const base = debtFor(this.cycle) * (this.has('teufel') ? 1.25 : 1) * (this.has('voodoo') ? 0.85 : 1) * (this.stage >= 1 ? 1.25 : 1);
     return roundNice(base * this.debtFactor + this.debtAdd);
   }
 
@@ -138,12 +153,18 @@ export class Run {
   }
 
   get interestRate(): number {
-    return BASE_INTEREST + this.perks.interest + 0.04 * this.items.filter((t) => t.def === 'sparschwein').length;
+    const r = BASE_INTEREST + this.perks.interest + 0.04 * this.items.filter((t) => t.def === 'sparschwein').length;
+    return this.stage >= 3 ? r / 2 : r;
+  }
+
+  /** The house rule that actually applies; the sunglasses ignore it. */
+  get activeRule(): RuleId | undefined {
+    return this.has('sonnenbrille') ? undefined : this.rule;
   }
 
   /** Most that may still be added to the table this round. */
   get betLimit(): number {
-    if (this.rule !== 'limit') return this.cash;
+    if (this.activeRule !== 'limit') return this.cash;
     return Math.max(0, Math.min(this.cash, Math.floor(this.moneyBefore / 4) - this.stakeTotal));
   }
 
@@ -159,7 +180,8 @@ export class Run {
     this.phase = 'betting';
     this.rule = this.cycle > 0 ? this.nextRule : undefined;
     if (this.cycle > 0) this.nextRule = this.rollRule();
-    this.cycleRounds = ROUNDS_PER_CYCLE + this.perks.extraRounds + this.items.filter((t) => t.def === 'taschenuhr').length - (this.rule === 'geiz' ? 1 : 0);
+    this.cycleRounds = Math.max(2, ROUNDS_PER_CYCLE + this.perks.extraRounds + this.items.filter((t) => t.def === 'taschenuhr').length
+      - (this.rule === 'geiz' && !this.has('sonnenbrille') ? 1 : 0) - (this.stage >= 4 ? 1 : 0));
     this.roundsLeft = this.cycleRounds;
     this.bets = {};
     this.rerollCost = 1;
@@ -169,8 +191,10 @@ export class Run {
 
   private rollVisions(): void {
     this.visions = [];
+    const twistable = ['red', 'black', 'even', 'odd', 'low', 'high', 'doz0', 'doz1', 'doz2', 'col0', 'col1', 'col2'];
+    this.cubeField = this.has('zauberwuerfel') ? this.rng.pick(twistable) : undefined;
     if (!this.has('kristallkugel')) return;
-    const w = pocketWeights(this.wheel, {}, this.items, this.rule);
+    const w = pocketWeights(this.wheel, {}, this.items, this.activeRule);
     while (this.visions.length < 3) {
       const k = this.rng.weighted(w);
       this.visions.push(k);
@@ -214,7 +238,7 @@ export class Run {
   }
 
   weights(): number[] {
-    return pocketWeights(this.wheel, this.bets, this.items, this.rule);
+    return pocketWeights(this.wheel, this.bets, this.items, this.activeRule);
   }
 
   /** Chance (0..1) that the ball lands in each pocket this round, visions included. */
@@ -231,9 +255,17 @@ export class Run {
 
   private input(isLastSpin: boolean) {
     return {
-      wheel: this.wheel, bets: this.bets, items: this.items, rule: this.rule, isLastSpin,
-      moneyBefore: this.moneyBefore, perks: this.perks,
+      wheel: this.wheel, bets: this.bets, items: this.items, rule: this.activeRule, isLastSpin,
+      moneyBefore: this.moneyBefore, perks: this.perks, cubeField: this.cubeField,
+      lastNumber: this.history[0]?.n, lossStreak: this.stats.lossStreak, sameBets: this.sameAsLast(),
     };
+  }
+
+  /** Whether the current bets are exactly last round's bets. */
+  sameAsLast(): boolean {
+    const a = Object.entries(this.bets).map(([k, v]) => `${k}:${stakeOf(v)}`).sort().join('|');
+    const b = Object.entries(this.lastBets).map(([k, v]) => `${k}:${stakeOf(v)}`).sort().join('|');
+    return a.length > 0 && a === b;
   }
 
   /** Resolves the spin immediately; the renderer animates towards `result.pocket`. */
@@ -260,6 +292,19 @@ export class Run {
           bestIndex = j;
         }
       }
+      // The voodoo doll's price: now and then luck turns against you.
+      if (this.has('voodoo') && this.rng.chance(1 / 3)) {
+        let worst = result;
+        for (const j of neighborIndices(index, reach)) {
+          const alt = scoreSpin(input, j);
+          if (alt.payout < worst.payout) {
+            worst = alt;
+            bestIndex = j;
+          }
+        }
+        if (worst !== result) best = worst;
+        else bestIndex = index;
+      }
       if (bestIndex !== index) result = { ...best, hop: { from: index, to: bestIndex } };
     }
     this.phase = 'spinning';
@@ -278,7 +323,8 @@ export class Run {
     this.deposit += this.lastInterest;
     this.history.unshift({ n: r.pocket.number, c: r.pocket.color });
     this.history.length = Math.min(this.history.length, 12);
-    this.trackStats(r);
+    const same = this.sameAsLast();
+    this.trackStats(r, same);
     this.lastBets = this.bets;
     this.bets = {};
     this.roundsLeft--;
@@ -291,8 +337,14 @@ export class Run {
     }
   }
 
-  private trackStats(r: SpinResult): void {
+  private trackStats(r: SpinResult, same: boolean): void {
     const s = this.stats;
+    if (r.anyWin && r.bets.length === 1) s.focusWins++;
+    s.nearMisses += r.nearMiss.length;
+    if (this.history[1] && this.history[1].n === r.pocket.number) s.repeats++;
+    s.minCash = Math.min(s.minCash, this.cash);
+    s.sameBetStreak = same ? s.sameBetStreak + 1 : 0;
+    s.bestSameBetStreak = Math.max(s.bestSameBetStreak, s.sameBetStreak);
     const won = r.payout - r.stake;
     s.spins++;
     if (won > 0) s.totalWon += won;
@@ -374,6 +426,13 @@ export class Run {
     return out;
   }
 
+  /** Hangs up on the boss. */
+  declineOffers(): void {
+    if (!this.offers.length) return;
+    this.offers = [];
+    this.stats.hangups++;
+  }
+
   /** Accepts one of the phone deals. Returns a message for the player. */
   chooseOffer(i: number): string | undefined {
     const id = this.offers[i];
@@ -420,16 +479,17 @@ export class Run {
     const owned = new Set(this.items.map((t) => t.def));
     const pool = Object.values(ITEMS).filter((d) => !owned.has(d.id) && !this.locked.has(d.id));
     const items: ShopItem[] = [];
+    const extra = this.stage >= 2 ? 1 : 0;
     for (let i = 0; i < 4 && pool.length; i++) {
       const k = this.rng.weighted(pool.map((d) => RARITY[d.rarity].weight));
       const [d] = pool.splice(k, 1);
-      items.push({ kind: 'item', def: d.id, price: itemPrice(d.id) });
+      items.push({ kind: 'item', def: d.id, price: itemPrice(d.id) + extra });
     }
     const tools = Object.values(POCKET_ITEMS);
     for (let i = 0; i < 2; i++) {
       const k = this.rng.weighted(tools.map((t) => t.weight));
       const [t] = tools.splice(k, 1);
-      items.push({ kind: 'pocket', def: t.id, price: t.price });
+      items.push({ kind: 'pocket', def: t.id, price: t.price + extra });
     }
     this.shop = items;
   }
@@ -464,7 +524,7 @@ export class Run {
       this.roundsLeft++;
       this.cycleRounds++;
     }
-    if (item.def === 'kristallkugel' && this.phase === 'betting') this.rollVisions();
+    if ((item.def === 'kristallkugel' || item.def === 'zauberwuerfel') && this.phase === 'betting') this.rollVisions();
     return true;
   }
 
@@ -506,6 +566,7 @@ export class Run {
       this.cycleRounds--;
     }
     if (t.def === 'kristallkugel' && !this.has('kristallkugel')) this.visions = [];
+    if (t.def === 'zauberwuerfel' && !this.has('zauberwuerfel')) this.cubeField = undefined;
     return true;
   }
 

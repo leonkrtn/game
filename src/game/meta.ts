@@ -10,6 +10,9 @@ export interface Profile {
   totalWon: number;
   done: string[];
   lastKit: string;
+  /** Highest debt stage unlocked (0..5). */
+  maxStage: number;
+  lastStage: number;
 }
 
 export interface Achievement {
@@ -39,12 +42,22 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'reich', name: 'Dagobert', desc: 'Besitze $5.000 (Bargeld und Einzahlung).', rewards: ['bankier'], check: (r) => r.stats.maxMoney >= 5000 },
   { id: 'hops', name: 'Hüpf!', desc: 'Lass die Kugel 3-mal durch Glück nachhüpfen.', rewards: ['taschenuhr'], check: (r) => r.stats.hops >= 3 },
   { id: 'frueh', name: 'Pünktlich', desc: 'Bezahle eine Rate vor der letzten Runde.', rewards: ['kleeblatt'], check: (r) => r.stats.earlyPays >= 1 },
+  { id: 'rate2', name: 'Durchhalter', desc: 'Bezahle 2 Raten in einem Spiel.', rewards: ['hasenpfote'], check: (r) => r.paidRates >= 2 },
+  { id: 'fokus', name: 'Alles auf eine Karte', desc: 'Gewinne mit deinem ganzen Einsatz auf einem einzigen Feld.', rewards: ['walkman'], check: (r) => r.stats.focusWins >= 1 },
+  { id: 'knapp', name: 'Knapp daneben', desc: 'Liege dreimal mit einem Plein direkt neben der Kugel.', rewards: ['pager'], check: (r) => r.stats.nearMisses >= 3 },
+  { id: 'doppel', name: 'Déjà-vu', desc: 'Dieselbe Zahl fällt zweimal hintereinander.', rewards: ['polaroid'], check: (r) => r.stats.repeats >= 1 },
+  { id: 'blank', name: 'Blank', desc: 'Hab einmal weniger als $5 Bargeld.', rewards: ['zippo'], check: (r) => r.stats.minCash < 5 },
+  { id: 'auflegen', name: 'Nein danke', desc: 'Leg auf, wenn der Boss anruft.', rewards: ['voodoo'], check: (r) => r.stats.hangups >= 1 },
+  { id: 'gewohnheit', name: 'Gewohnheitstier', desc: 'Setze dreimal hintereinander genau dasselbe.', rewards: ['kassette'], check: (r) => r.stats.bestSameBetStreak >= 3 },
+  { id: 'reich2', name: 'Goldjunge', desc: 'Besitze $20.000 (Bargeld und Einzahlung).', rewards: ['goldkette'], check: (r) => r.stats.maxMoney >= 20000 },
+  { id: 'stufe1', name: 'Stammkunde', desc: 'Bezahle eine Rate auf Schuldenstufe 1 oder höher.', rewards: ['zauberwuerfel'], check: (r) => r.stage >= 1 && r.paidRates >= 1 },
+  { id: 'stufe3', name: 'Unantastbar', desc: 'Bezahle 4 Raten auf Schuldenstufe 3 oder höher.', rewards: ['sonnenbrille'], check: (r) => r.stage >= 3 && r.paidRates >= 4 },
 ];
 
 const KEY = 'rien-ne-va-plus/profile/v1';
 
 export function emptyProfile(): Profile {
-  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch' };
+  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch', maxStage: 0, lastStage: 0 };
 }
 
 export function loadProfile(): Profile {
@@ -87,6 +100,7 @@ export function checkAchievements(p: Profile, run: Run): Achievement[] {
 export function recordRun(p: Profile, run: Run, won: boolean): void {
   p.runs++;
   if (won) p.wins++;
+  if (won && run.stage >= p.maxStage) p.maxStage = Math.min(5, run.stage + 1);
   p.bestRates = Math.max(p.bestRates, run.paidRates);
   p.bestWin = Math.max(p.bestWin, run.stats.bestWin);
   p.totalWon += run.stats.totalWon;

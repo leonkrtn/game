@@ -109,6 +109,11 @@ class Sfx {
     this.tone(110, 1.2, 'sawtooth', 0.15, 0, -60);
     this.noise(0.3, 0.6, 400, 0.2);
   }
+  /** Tape rewinding: a rising whine over hiss. */
+  rewind(): void {
+    this.tone(300, 0.6, 'sawtooth', 0.04, 0, 1800);
+    this.noise(0.6, 0.2, 2500);
+  }
 }
 
 export const sfx = new Sfx();

@@ -22,6 +22,14 @@ export interface SpinInput {
   /** Cash before the stakes were taken off, for "bet at least half" effects. */
   moneyBefore: number;
   perks: Perks;
+  /** Field twisted by the magic cube this round. */
+  cubeField?: string;
+  /** Number of the previous round. */
+  lastNumber?: number;
+  /** Rounds lost in a row before this one. */
+  lossStreak?: number;
+  /** True when the bets equal last round's bets. */
+  sameBets?: boolean;
 }
 
 export interface BetResult {
@@ -74,7 +82,8 @@ export function activeItems(items: ItemInstance[]): { src: ItemInstance; inst: I
 }
 
 export function luckOf(items: ItemInstance[], perks: Perks): number {
-  return perks.luck + activeItems(items).reduce((a, x) => a + (ITEMS[x.inst.def].luck ?? 0), 0);
+  const free = Math.max(0, perks.slots - items.length);
+  return perks.luck + activeItems(items).reduce((a, x) => a + (ITEMS[x.inst.def].luck ?? 0) + (x.inst.def === 'hasenpfote' ? free : 0), 0);
 }
 
 /** Relative chance of the ball landing in each pocket. */
@@ -119,6 +128,19 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     if (f.kind === 'red' && rule === 'rotfluch') won = false;
     if (f.kind === 'straight' && rule === 'halbzahl') payout = 18;
     results.push({ fieldId: fid, stake, won, payout: won ? payout : 0, amount: won ? stake * payout : 0 });
+  }
+  // The pager turns near misses on pleins into small wins.
+  const pagers = activeItems(items).filter((x) => x.inst.def === 'pager');
+  if (pagers.length) {
+    const near = neighborIndices(pocketIndex).map((i) => wheel[i].number);
+    for (const r of results) {
+      const f = FIELD_BY_ID[r.fieldId];
+      if (!r.won && f.kind === 'straight' && near.includes(f.value)) {
+        r.won = true;
+        r.payout = 8;
+        r.amount = r.stake * 8;
+      }
+    }
   }
   const winners = results.filter((r) => r.won);
   const anyWin = winners.length > 0;
@@ -175,6 +197,15 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
       case 'zinnsoldat':
         if (results.length >= 4) add(name, 1, src.uid);
         break;
+      case 'walkman':
+        if (results.length === 1) add(name, 1, src.uid);
+        break;
+      case 'kassette':
+        if (input.sameBets) add(name, 1, src.uid);
+        break;
+      case 'goldkette':
+        add(name, Math.min(3, Math.floor(input.moneyBefore / 50) * 0.1), src.uid);
+        break;
       case 'glocke':
         if (anyWin) growth[inst.uid] = 1;
         add(name, 0.2 * (inst.counter + (growth[inst.uid] ?? 0)), src.uid);
@@ -201,6 +232,9 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     if (inst.def === 'goldbarren' && pocket.mod === 'gold') mul(name, 2, src.uid);
     if (inst.def === 'zigarre' && stake >= input.moneyBefore / 2) mul(name, 1.5, src.uid);
     if (inst.def === 'teufel') mul(name, 2, src.uid);
+    if (inst.def === 'zippo' && (input.lossStreak ?? 0) >= 2) mul(name, 2, src.uid);
+    if (inst.def === 'polaroid' && input.lastNumber === pocket.number) mul(name, 5, src.uid);
+    if (inst.def === 'zauberwuerfel' && input.cubeField && winners.some((w) => w.fieldId === input.cubeField)) mul(name, 3, src.uid);
   }
   mult = Math.round(mult * 1000) / 1000;
 

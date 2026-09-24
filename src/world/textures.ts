@@ -33,8 +33,8 @@ export function boardTexture(): THREE.CanvasTexture {
   const k = tilePx / 330;
   const [c, g] = canvas(Math.round(BOARD_SIZE.w * ppu), Math.round(BOARD_SIZE.d * ppu));
   const grad = g.createRadialGradient(c.width / 2, c.height / 2, 50, c.width / 2, c.height / 2, c.width * 0.6);
-  grad.addColorStop(0, '#1f7a4a');
-  grad.addColorStop(1, '#10492c');
+  grad.addColorStop(0, '#11502f');
+  grad.addColorStop(1, '#0a331d');
   g.fillStyle = grad;
   g.fillRect(0, 0, c.width, c.height);
   // Felt noise.
@@ -64,7 +64,7 @@ export function boardTexture(): THREE.CanvasTexture {
       g.closePath();
       g.fill();
     }
-    g.strokeStyle = 'rgba(245, 230, 190, 0.9)';
+    g.strokeStyle = 'rgba(226, 200, 130, 0.85)';
     g.lineWidth = 6 * k;
     g.strokeRect(x, y, w, h);
 

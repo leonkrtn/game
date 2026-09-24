@@ -1,20 +1,18 @@
-import { DEBTS, ITEMS, OFFERS, POCKET_ITEMS, RARITY, START_KITS, type PocketToolId } from '../game/content';
+import { DEBTS, ITEMS, OFFERS, POCKET_ITEMS, POCKET_MOD_INFO, RARITY, STAGES, START_KITS, type PocketToolId } from '../game/content';
 import { ACHIEVEMENTS, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
+import type { ItemPreview } from '../world/preview';
 import { fmt, h } from './dom';
-import { itemDesc, modLegend, numberPicker, rarityColor, wheelRing } from './hud';
+import { itemDesc, modLegend, numberPicker, pct, rarityClass, row, wheelRing } from './hud';
 
-const pct = (x: number) => Math.round(x * 100) + ' %';
-
-function header(title: string, right: HTMLElement[], close: () => void): HTMLElement {
-  return h('div', { class: 'head' },
-    h('h2', { text: title }),
-    h('div', { class: 'row' }, ...right, h('button', { class: 'ghost', onclick: close, html: 'Zurück <kbd>Esc</kbd>' })),
-  );
+function head(title: string, right = ''): HTMLElement {
+  return h('div', { class: 'head' }, h('h2', { text: title }), h('span', { html: right }));
 }
 
-// ---- Cashier ------------------------------------------------------------------
+const label = (text: string) => h('div', { class: 'label', text });
+
+// ---- Cashier --------------------------------------------------------------------------
 
 export interface KasseHandlers {
   deposit(amount: number): void;
@@ -28,51 +26,41 @@ export function kasseView(run: Run, hd: KasseHandlers): HTMLElement {
   const missing = Math.max(0, run.debt - run.deposit);
   const short = run.debt - run.deposit - run.cash;
   const cash = run.cash;
-  const depositBtn = (label: string, amount: number) =>
-    h('button', { class: 'ghost', onclick: () => hd.deposit(amount), disabled: amount <= 0 || amount > cash || !run.cashierOpen, text: label });
+  const dep = (text: string, amount: number) => row(text, fmt(Math.max(0, Math.floor(amount))), () => hd.deposit(amount), { disabled: amount < 1 || amount > cash || !run.cashierOpen });
 
   let payNote = '';
   if (run.stakeTotal > 0) payNote = 'Erst deine Einsätze vom Tisch nehmen.';
   else if (!run.canPay()) payNote = `Dir fehlen noch ${fmt(short)}.`;
-  else if (run.phase === 'betting') payNote = `Früh zahlen bringt Glücksmarken: +◆${run.payMarks} statt +◆${run.payMarks - run.roundsLeft}.`;
+  else if (run.phase === 'betting') payNote = `Früh zahlen bringt mehr Glücksmarken: +◆${run.payMarks} statt +◆${run.payMarks - run.roundsLeft}.`;
 
-  return h('div', { class: 'panel dialog', style: 'max-width:760px' },
-    header('Kasse', [h('b', { class: 'num', style: 'color:var(--money);font-size:20px', text: fmt(cash) })], hd.close),
-    h('div', { class: 'cols', style: 'margin-top:16px' },
-      h('div', { class: 'box' + (due ? ' alert' : '') },
-        h('div', { class: 'eyebrow', text: run.endless ? `Rate ${run.cycle + 1} · endlos` : `Rate ${run.cycle + 1} von ${DEBTS.length}` }),
-        h('div', { class: 'big debt', text: fmt(run.debt) }),
-        h('p', {
-          style: 'margin:0',
-          html: due
-            ? short > 0
-              ? `Die Herren von der Kreditabteilung warten. Dir fehlen <b>${fmt(short)}</b>.`
-              : 'Die Herren von der Kreditabteilung warten. Zeit zu zahlen.'
-            : `Fällig nach Runde ${run.cycleRounds}. Noch <b>${run.roundsLeft}</b> Runde${run.roundsLeft === 1 ? '' : 'n'}.`,
-        }),
-        h('div', { class: 'row' },
-          h('button', { onclick: hd.pay, disabled: !run.canPay(), text: `Rate bezahlen (+◆${run.payMarks})` }),
-          due && short > 0 ? h('button', { class: 'danger', onclick: hd.surrender, text: 'Aufgeben' }) : null,
-        ),
-        payNote ? h('div', { class: 'small', text: payNote }) : null,
+  return h('div', { class: 'menu' },
+    head('KASSE 01', `BARGELD <span class="money-c">${fmt(cash)}</span>`),
+    h('div', { class: 'cols' },
+      h('div', { class: 'rows' },
+        label(run.endless ? `RATE ${run.cycle + 1} · ENDLOS` : `RATE ${run.cycle + 1} VON ${DEBTS.length}`),
+        h('div', { class: 'stat' }, h('span', { text: 'FÄLLIG' }), h('span', { class: 'debt-c', text: fmt(run.debt) })),
+        h('div', { class: 'stat' }, h('span', { text: 'EINGEZAHLT' }), h('span', { text: fmt(run.deposit) })),
+        h('div', { class: 'stat' }, h('span', { text: due ? 'STATUS' : 'NOCH' }), h('span', { class: due ? 'rec-c' : '', text: due ? 'JETZT FÄLLIG' : `${run.roundsLeft} RUNDE${run.roundsLeft === 1 ? '' : 'N'}` })),
+        label('AKTIONEN'),
+        row('RATE BEZAHLEN', `+◆${run.payMarks}`, hd.pay, { disabled: !run.canPay() }),
+        payNote ? h('div', { class: 'info', text: payNote }) : null,
+        due && short > 0 ? row('<span class="rec-c">AUFGEBEN</span>', '', hd.surrender) : null,
+        row('ZURÜCK', 'ESC', hd.close),
       ),
-      h('div', { class: 'box' },
-        h('div', { class: 'eyebrow', text: 'Einzahlung' }),
-        h('div', { class: 'big', style: 'color:var(--brass-hi)', text: fmt(run.deposit) }),
-        h('p', { class: 'small', style: 'margin:0', html: `Eingezahltes Geld ist sicher vor dem Tisch und bringt <b>${pct(run.interestRate)} Zinsen</b> nach jeder Runde. Zurück bekommst du es nicht – es ist für die Rate.` }),
-        h('div', { class: 'row' },
-          depositBtn('+ $10', 10),
-          depositBtn('+ 25 %', Math.floor(cash * 0.25)),
-          depositBtn('+ 50 %', Math.floor(cash * 0.5)),
-          depositBtn('Alles', cash),
-        ),
-        missing > 0 ? h('button', { onclick: () => hd.deposit(Math.min(missing, cash)), disabled: cash <= 0 || !run.cashierOpen, text: `Bis zur Rate auffüllen (${fmt(Math.min(missing, cash))})` }) : h('div', { class: 'small', style: 'color:var(--money)', text: 'Die Rate ist durch deine Einzahlung gedeckt.' }),
+      h('div', { class: 'rows' },
+        label(`EINZAHLEN · ${pct(run.interestRate)} ZINSEN PRO RUNDE`),
+        h('div', { class: 'info', text: 'Eingezahltes Geld ist sicher vor dem Tisch und wächst nach jeder Runde. Zurück bekommst du es nicht – es gehört der Rate.' }),
+        missing > 0 ? dep('BIS ZUR RATE', Math.min(missing, cash)) : h('div', { class: 'info money-c', text: 'Die Rate ist durch deine Einzahlung gedeckt.' }),
+        dep('+ $10', 10),
+        dep('+ 25 %', cash * 0.25),
+        dep('+ 50 %', cash * 0.5),
+        dep('ALLES', cash),
       ),
     ),
   );
 }
 
-// ---- Showcase -------------------------------------------------------------------
+// ---- Showcase ----------------------------------------------------------------------------
 
 export interface VitrineHandlers {
   buy(i: number): void;
@@ -83,109 +71,105 @@ export interface VitrineHandlers {
   close(): void;
 }
 
-export function vitrineView(run: Run, hd: VitrineHandlers): HTMLElement {
-  const offer = h('div', { class: 'cards' });
+export function vitrineView(run: Run, hd: VitrineHandlers, preview: ItemPreview): HTMLElement {
+  const name = h('div', { class: 'name' });
+  const rar = h('div', {});
+  const desc = h('div', { class: 'desc' });
+  const show = (kind: 'item' | 'pocket', def: string, owned?: { counter: number; uid: number }) => {
+    if (kind === 'item') {
+      const d = ITEMS[def];
+      name.textContent = d.name;
+      name.className = 'name ' + rarityClass(def);
+      rar.textContent = RARITY[d.rarity].name.toUpperCase() + (owned ? ' · AUF DEINEM TISCH' : '');
+      desc.textContent = owned ? itemDesc({ def, counter: owned.counter, uid: owned.uid }) : d.desc.replace(' (aktuell +{n})', '');
+      preview.show(def);
+    } else {
+      const p = POCKET_ITEMS[def as PocketToolId];
+      name.textContent = p.name;
+      name.className = 'name';
+      rar.textContent = 'RAD-UMBAU';
+      desc.textContent = p.desc;
+      preview.show('upgrade:' + def, POCKET_MOD_INFO[def as keyof typeof POCKET_MOD_INFO]?.color ?? (def === 'pinsel' ? '#e8e0d0' : '#7a7aff'));
+    }
+  };
+
+  const offer = h('div', { class: 'rows' }, label('IM ANGEBOT · PREIS IN GLÜCKSMARKEN'));
   run.shop.forEach((it, i) => {
     const isItem = it.kind === 'item';
-    const name = isItem ? ITEMS[it.def].name : POCKET_ITEMS[it.def as PocketToolId].name;
-    const desc = isItem ? ITEMS[it.def].desc.replace(' (aktuell +{n})', '') : POCKET_ITEMS[it.def as PocketToolId].desc;
-    const label = isItem ? RARITY[ITEMS[it.def].rarity].name : 'Rad-Umbau';
+    const n = isItem ? ITEMS[it.def].name : POCKET_ITEMS[it.def as PocketToolId].name;
     const full = isItem && run.items.length >= run.perks.slots;
-    const card = h('div', { class: 'card' + (it.sold ? ' sold' : ''), style: `--rc:${isItem ? rarityColor(it.def) : '#b48cff'}` },
-      h('div', { class: 'rar', text: label }),
-      h('div', { class: 'name', text: name }),
-      h('div', { class: 'desc', text: desc }),
-      h('button', {
-        onclick: () => (isItem ? hd.buy(i) : hd.target(i)),
-        disabled: !run.canBuy(i),
-        html: it.sold ? 'Verkauft' : full ? 'Tisch ist voll' : `<span>Kaufen · ◆${it.price}</span>`,
-      }),
-    );
-    offer.append(card);
+    const cls = isItem ? rarityClass(it.def) : '';
+    const value = it.sold ? 'VERKAUFT' : full ? 'TISCH VOLL' : `<span class="price">◆${it.price}</span>`;
+    offer.append(row(`<span class="${cls}">${n}</span>`, value, () => (isItem ? hd.buy(i) : hd.target(i)), {
+      disabled: !run.canBuy(i),
+      onHover: () => show(isItem ? 'item' : 'pocket', it.def),
+    }));
   });
+  offer.append(row('NEU BESTÜCKEN', `<span class="price">◆${run.rerollCost}</span>`, hd.reroll, { disabled: run.marks < run.rerollCost || !run.cashierOpen }));
 
-  const mine = h('div', { class: 'mine' });
-  if (!run.items.length) mine.append(h('div', { class: 'muted', text: 'Noch nichts. Talismane stehen auf deinem Tisch und wirken bei jedem Dreh.' }));
-  run.items.forEach((t, i) => {
-    mine.append(h('div', { class: 'it' },
-      h('div', { class: 'n', style: `color:${rarityColor(t.def)}`, text: ITEMS[t.def].name }),
-      h('div', { class: 'row' },
-        h('button', { class: 'ghost small', onclick: () => hd.move(t.uid, -1), disabled: i === 0, title: 'Nach links', text: '◀' }),
-        h('button', { class: 'ghost small', onclick: () => hd.move(t.uid, 1), disabled: i === run.items.length - 1, title: 'Nach rechts', text: '▶' }),
-        h('button', { class: 'ghost small', onclick: () => hd.sell(t.uid), text: `Verkaufen +◆${run.sellPrice(t.uid)}` }),
-      ),
-      h('div', { class: 'd', text: itemDesc(t) }),
-    ));
+  const mine = h('div', { class: 'rows' }, label(`AUF DEINEM TISCH ${run.items.length}/${run.perks.slots} · ◀ ▶ VERSCHIEBEN, ENTER VERKAUFT`));
+  if (!run.items.length) mine.append(h('div', { class: 'info', text: 'Noch nichts. Talismane stehen auf deinem Tisch und wirken bei jedem Dreh. Die Reihenfolge zählt für den Handspiegel.' }));
+  run.items.forEach((t) => {
+    mine.append(row(`<span class="${rarityClass(t.def)}">${ITEMS[t.def].name}</span>`, `VERKAUFEN +◆${run.sellPrice(t.uid)}`, () => hd.sell(t.uid), {
+      onHover: () => show('item', t.def, t),
+      onStep: (d) => hd.move(t.uid, d as -1 | 1),
+    }));
   });
+  mine.append(row('ZURÜCK', 'ESC', hd.close));
 
-  return h('div', { class: 'panel dialog' },
-    header('Kuriositäten', [h('b', { class: 'marks', style: 'font-size:20px', text: `◆ ${run.marks}` })], hd.close),
-    h('p', { class: 'muted', text: 'Bezahlt wird mit Glücksmarken. Die gibt es für jede bezahlte Rate – und mehr, wenn du früher zahlst.' }),
-    h('div', { class: 'cols three' },
-      h('div', {},
-        h('h4', { text: 'Im Angebot' }),
-        offer,
-        h('div', { class: 'row', style: 'margin-top:12px' },
-          h('button', { class: 'ghost', onclick: hd.reroll, disabled: run.marks < run.rerollCost || !run.cashierOpen, text: `Neu bestücken (◆${run.rerollCost})` }),
-          h('span', { class: 'small', text: 'Nach jeder Rate kommt neue Ware.' }),
-        ),
-      ),
-      h('div', {},
-        h('h4', { text: `Auf deinem Tisch (${run.items.length}/${run.perks.slots})` }),
-        h('div', { class: 'small', style: 'margin-bottom:6px', text: 'Die Reihenfolge zählt: der Handspiegel kopiert seinen rechten Nachbarn.' }),
-        mine,
-      ),
+  const first = run.shop.find((s) => !s.sold) ?? run.shop[0];
+  if (first) show(first.kind === 'item' ? 'item' : 'pocket', first.def);
+  else if (run.items[0]) show('item', run.items[0].def, run.items[0]);
+
+  return h('div', { class: 'menu' },
+    head('KURIOSITÄTEN', `<span class="price">◆ ${run.marks} GLÜCKSMARKEN</span>`),
+    h('div', { class: 'cols' },
+      h('div', { class: 'rows', style: 'gap:10px' }, offer, mine),
+      h('div', { class: 'preview' }, preview.canvas, rar, name, desc),
     ),
   );
 }
 
-// ---- Phone --------------------------------------------------------------------------
+// ---- Phone ---------------------------------------------------------------------------------
 
 export function phoneView(run: Run, choose: (i: number) => void, hangUp: () => void): HTMLElement {
-  const cards = h('div', { class: 'cards' });
-  run.offers.forEach((id, i) => {
-    const o = OFFERS[id];
-    cards.append(h('div', { class: 'card offer clickable', style: '--rc:var(--danger)', onclick: () => choose(i) },
-      h('div', { class: 'rar', text: 'Angebot' }),
-      h('div', { class: 'name', text: o.name }),
-      h('div', { class: 'desc', text: o.desc }),
-    ));
-  });
   const lines = [
     '„Du hast bezahlt. Respekt. Ich mag Leute, die zahlen. Ich hab da was für dich …"',
     '„Pünktlich wie ein Uhrwerk. Lass uns über dich reden, mein Freund."',
     '„Weißt du, was ich an dir mag? Du bist noch da. Hör zu …"',
   ];
-  return h('div', { class: 'panel dialog', style: 'max-width:760px' },
-    h('div', { class: 'head' }, h('h2', { text: 'Der Boss ist dran' }), h('button', { class: 'ghost', onclick: hangUp, text: 'Auflegen' })),
-    h('p', { style: 'font-size:17px;font-style:italic', text: lines[run.paidRates % lines.length] }),
-    h('h4', { text: 'Such dir eins aus' }),
-    cards,
+  const detail = h('div', { class: 'info', style: 'min-height:2.3em' });
+  const rows = h('div', { class: 'rows' });
+  run.offers.forEach((id, i) => {
+    const o = OFFERS[id];
+    rows.append(row(o.name, '', () => choose(i), { onHover: () => (detail.textContent = o.desc) }));
+  });
+  rows.append(row('AUFLEGEN', '', hangUp, { onHover: () => (detail.textContent = 'Der Boss mag es nicht, wenn man auflegt.') }));
+  if (run.offers[0]) detail.textContent = OFFERS[run.offers[0]].desc;
+  return h('div', { class: 'menu', style: 'margin-top:auto;margin-bottom:6vh;width:min(900px,100%)' },
+    h('div', { style: 'color:var(--luck);font-size:32px;text-align:center', text: 'BOSS: ' + lines[run.paidRates % lines.length] }),
+    rows,
+    detail,
   );
 }
 
-// ---- Wheel ------------------------------------------------------------------------------
+// ---- Wheel ------------------------------------------------------------------------------------
 
-/** Wheel view; with `apply` it lets the player use a bought wheel upgrade. */
 export function wheelView(run: Run, close: () => void, upgrade?: { index: number; apply: (pocket: number, num?: number) => void }): HTMLElement {
-  const box = h('div', { class: 'panel dialog', style: 'max-width:560px' });
+  const box = h('div', { class: 'menu', style: 'width:min(640px,100%)' });
   const def = upgrade ? POCKET_ITEMS[run.shop[upgrade.index].def as PocketToolId] : undefined;
   const render = (chosen?: Pocket) => {
     box.replaceChildren(
-      h('div', { class: 'head' },
-        h('h2', { text: def ? def.name : 'Das Rad' }),
-        h('button', { class: 'ghost', onclick: close, html: (def ? 'Abbrechen' : 'Schließen') + ' <kbd>Esc</kbd>' }),
-      ),
+      head(def ? def.name : 'DAS RAD', 'ESC ZURÜCK'),
       h('p', {
-        class: 'muted',
+        class: 'info',
         text: def
-          ? chosen ? `Welche Zahl soll das Fach „${chosen.number}" bekommen?` : `${def.desc} Wähle ein Fach.`
+          ? chosen ? `Welche Zahl soll das Fach „${chosen.number}" bekommen?` : `${def.desc} Klicke auf ein Fach.`
           : 'Reihenfolge wie auf dem echten Rad. Die Prozente zeigen, wie oft die Kugel in dieser Runde in jedem Fach landet.',
       }),
     );
     if (chosen && def?.id === 'pinsel') {
-      box.append(numberPicker((n) => upgrade!.apply(chosen.index, n)));
-      box.append(h('button', { class: 'ghost', style: 'margin-top:10px', onclick: () => render(), text: 'Anderes Fach wählen' }));
+      box.append(numberPicker((n) => upgrade!.apply(chosen.index, n)), h('div', { class: 'rows' }, row('ANDERES FACH', '', () => render())));
       return;
     }
     const reds = run.wheel.filter((p) => p.color === 'red').length;
@@ -193,103 +177,129 @@ export function wheelView(run: Run, close: () => void, upgrade?: { index: number
     box.append(
       wheelRing(run, {
         pick: def ? (p) => (def.id === 'pinsel' ? render(p) : upgrade!.apply(p.index)) : undefined,
-        center: def ? 'Klicke auf ein Fach' : `${reds}× Rot<br>${blacks}× Schwarz<br>${37 - reds - blacks}× Grün`,
+        center: def ? 'FACH<br>WÄHLEN' : `${reds}× ROT<br>${blacks}× SCHWARZ<br>${37 - reds - blacks}× GRÜN`,
       }),
       modLegend(),
+      h('div', { class: 'rows' }, row('ZURÜCK', 'ESC', close)),
     );
   };
   render();
   return box;
 }
 
-// ---- Start, collection, end ----------------------------------------------------------
+// ---- Start menu, collection, controls ------------------------------------------------------------
 
-export function startView(profile: Profile, locked: Set<string>, start: (kit: string) => void, collection: () => void): HTMLElement {
+export interface StartHandlers {
+  start(kit: string, stage: number): void;
+  collection(): void;
+  controls(): void;
+  toggleSound(): boolean;
+}
+
+export function startView(profile: Profile, locked: Set<string>, hd: StartHandlers, soundOn: boolean): HTMLElement {
+  const kits = Object.values(START_KITS);
   let kit = locked.has(profile.lastKit) ? 'klassisch' : profile.lastKit;
-  const kits = h('div', { class: 'kits' });
-  const renderKits = () => {
-    kits.replaceChildren();
-    for (const k of Object.values(START_KITS)) {
-      const isLocked = locked.has(k.id);
-      const cond = ACHIEVEMENTS.find((a) => a.rewards.includes(k.id));
-      kits.append(h('button', {
-        class: 'kit' + (k.id === kit ? ' sel' : ''),
-        disabled: isLocked,
-        onclick: () => {
-          kit = k.id;
-          renderKits();
-        },
-      },
-      h('span', { class: 'n', text: isLocked ? '???' : k.name }),
-      h('span', { class: 'd', text: isLocked ? `Gesperrt: ${cond?.desc ?? ''}` : k.desc })));
-    }
+  let stage = Math.min(profile.lastStage ?? 0, profile.maxStage ?? 0);
+  const info = h('div', { class: 'foot' });
+  const kitValue = h('span', { class: 'v' });
+  const stageValue = h('span', { class: 'v' });
+  const renderValues = () => {
+    const k = START_KITS[kit];
+    kitValue.textContent = `◀ ${k.name.toUpperCase()} ▶`;
+    stageValue.textContent = `◀ ${stage}: ${STAGES[stage].name.toUpperCase()} ▶`;
   };
-  renderKits();
-  const done = profile.done.length;
-  return h('div', { class: 'panel dialog', style: 'max-width:820px' },
-    h('div', { class: 'title-block' },
-      h('h1', { text: 'Rien ne va plus' }),
-      h('div', { class: 'tagline', text: 'Ein Tisch. Eine Kasse. Und Schulden bei den falschen Leuten.' }),
+  const stepKit = (d: number) => {
+    const open = kits.filter((k) => !locked.has(k.id));
+    const i = open.findIndex((k) => k.id === kit);
+    kit = open[(i + d + open.length) % open.length].id;
+    renderValues();
+    info.textContent = START_KITS[kit].desc;
+  };
+  const stepStage = (d: number) => {
+    stage = Math.max(0, Math.min(profile.maxStage ?? 0, stage + d));
+    renderValues();
+    info.textContent = `Schuldenstufe ${stage}: ${STAGES.slice(1, stage + 1).map((s) => s.desc).join(' ') || STAGES[0].desc}`;
+  };
+  renderValues();
+  info.textContent = 'Du hast dir Geld bei den falschen Leuten geliehen. Alle fünf Runden kommen sie an die Kasse. Setz dein echtes Geld, sammel Talismane – und bezahl.';
+  const lockedKits = kits.filter((k) => locked.has(k.id)).length;
+  const sound = row('TON', soundOn ? 'AN' : 'AUS', () => {
+    const on = hd.toggleSound();
+    (sound.lastElementChild as HTMLElement).textContent = on ? 'AN' : 'AUS';
+  });
+  return h('div', { class: 'start' },
+    h('h1', { html: 'RIEN NE<br>VA PLUS' }),
+    h('div', { class: 'tag', text: 'EIN TISCH. EINE KASSE. SCHULDEN.' }),
+    h('div', { class: 'rows' },
+      row('▶ NEUES SPIEL', '', () => hd.start(kit, stage)),
+      row('START', kitValue, () => stepKit(1), { onStep: stepKit, onHover: () => (info.textContent = START_KITS[kit].desc + (lockedKits ? ` · ${lockedKits} weitere gesperrt` : '')) }),
+      row('SCHULDENSTUFE', stageValue, () => stepStage(1), {
+        onStep: stepStage,
+        onHover: () => (info.textContent = (profile.maxStage ?? 0) === 0 ? 'Bezahle alle 8 Raten, um die nächste Schuldenstufe freizuschalten.' : `Freigeschaltet bis Stufe ${profile.maxStage}. ${STAGES[stage].desc}`),
+      }),
+      row('SAMMLUNG', `${profile.done.length}/${ACHIEVEMENTS.length}`, hd.collection),
+      row('STEUERUNG', '', hd.controls),
+      sound,
     ),
-    h('p', { style: 'font-size:16px', html: 'Du setzt <b>dein echtes Geld</b> am Roulettetisch. Alle <b>5 Runden</b> wollen die Geldeintreiber an der <b>Kasse</b> ihre Rate. Zahl ein, was du sicher behalten willst – eingezahltes Geld bringt Zinsen. Mit <b>Glücksmarken</b> kaufst du in der Vitrine <b>Talismane</b>, die auf deinem Tisch stehen und das Glück verbiegen. Und wenn das rote Telefon klingelt: geh ran.' }),
-    h('h4', { text: 'Womit fängst du an?' }),
-    kits,
-    h('div', { class: 'cols', style: 'margin-top:16px' },
-      h('div', {},
-        h('h4', { text: 'Steuerung' }),
-        h('div', { class: 'controls', html: `
-          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><span>Laufen, <kbd>Shift</kbd> rennen</span>
-          <span><kbd>E</kbd></span><span>Tisch, Kasse, Vitrine, Telefon</span>
-          <span>Linksklick</span><span>Jeton setzen (auch auf Linien und Ecken)</span>
-          <span>Rechtsklick</span><span>Jeton zurücknehmen</span>
-          <span><kbd>1</kbd>–<kbd>6</kbd></span><span>Jeton-Wert wählen</span>
-          <span><kbd>Leertaste</kbd></span><span>Drehen, halten = schneller</span>
-          <span><kbd>M</kbd></span><span>Ton an/aus</span>` }),
-      ),
-      h('div', {},
-        h('h4', { text: 'Bisher' }),
-        h('div', { class: 'lifetime', html: `<span>Spiele <b>${profile.runs}</b></span><span>Meiste Raten <b>${profile.bestRates}</b></span><span>Bester Gewinn <b>${fmt(profile.bestWin)}</b></span><span>Frei gekommen <b>${profile.wins}×</b></span>` }),
-        h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'ghost', onclick: collection, text: `Sammlung (${done}/${ACHIEVEMENTS.length})` })),
-      ),
-    ),
-    h('div', { class: 'row', style: 'margin-top:20px' }, h('button', { onclick: () => start(kit), style: 'font-size:18px;padding:10px 22px', text: 'Ins Casino gehen' })),
+    info,
+    h('div', { class: 'foot', html: `SPIELE ${profile.runs} · MEISTE RATEN ${profile.bestRates} · BESTER GEWINN ${fmt(profile.bestWin)} · FREI ${profile.wins}×` }),
   );
 }
 
 export function collectionView(profile: Profile, back: () => void): HTMLElement {
-  const list = h('div', {});
+  const list = h('div', { class: 'rows', style: 'max-height:62vh;overflow:auto' });
   for (const a of ACHIEVEMENTS) {
     const done = profile.done.includes(a.id);
     list.append(h('div', { class: 'ach' + (done ? ' done' : '') },
-      h('span', { class: 'mark', text: done ? '◆' : '◇' }),
-      h('span', {}, h('span', { class: 'n', text: a.name }), ' · ', h('span', { class: 'muted', text: a.desc })),
-      h('span', { class: 'r', text: (done ? 'Freigeschaltet: ' : 'Schaltet frei: ') + a.rewards.map(rewardName).join(', ') }),
+      h('span', { text: done ? '◆' : '◇' }),
+      h('span', { text: `${a.name.toUpperCase()} – ${a.desc}` }),
+      h('span', { class: 'd', text: (done ? 'Freigeschaltet: ' : 'Schaltet frei: ') + a.rewards.map(rewardName).join(', ') }),
     ));
   }
-  return h('div', { class: 'panel dialog', style: 'max-width:680px' },
-    h('div', { class: 'head' }, h('h2', { text: 'Sammlung' }), h('button', { class: 'ghost', onclick: back, text: 'Zurück' })),
-    h('p', { class: 'muted', text: 'Erfolge schalten neue Talismane und Startausrüstungen frei. Sie bleiben in diesem Browser gespeichert.' }),
+  return h('div', { class: 'menu' },
+    head('SAMMLUNG', `${profile.done.length}/${ACHIEVEMENTS.length}`),
+    h('p', { class: 'info', text: 'Erfolge schalten neue Talismane und Startausrüstungen frei. Siege schalten die nächste Schuldenstufe frei. Alles bleibt in diesem Browser gespeichert.' }),
     list,
+    h('div', { class: 'rows' }, row('ZURÜCK', 'ESC', back)),
   );
 }
 
-export function gameOverView(run: Run, restart: () => void): HTMLElement {
-  return h('div', { class: 'panel dialog caught', style: 'max-width:560px' },
-    h('h1', { text: 'Erwischt.' }),
-    h('p', { style: 'font-size:17px', html: `Die Geldeintreiber wollten <b>${fmt(run.debt)}</b>. Du hattest <b>${fmt(run.cash + run.deposit)}</b>. Sie waren nicht begeistert.` }),
-    h('div', { class: 'lifetime', html: `<span>Bezahlte Raten <b>${run.paidRates}</b></span><span>Runden <b>${run.stats.spins}</b></span><span>Bester Gewinn <b>${fmt(run.stats.bestWin)}</b></span><span>Nachhopser <b>${run.stats.hops}</b></span>` }),
-    h('div', { class: 'row', style: 'margin-top:18px' }, h('button', { onclick: restart, text: 'Noch einmal' })),
+export function controlsView(back: () => void): HTMLElement {
+  const lines: [string, string][] = [
+    ['WASD / PFEILE', 'LAUFEN, SHIFT RENNT'],
+    ['E', 'TISCH, KASSE, VITRINE, TELEFON'],
+    ['LINKSKLICK', 'JETON SETZEN – AUCH AUF LINIEN UND ECKEN'],
+    ['RECHTSKLICK', 'JETON ZURÜCKNEHMEN'],
+    ['1–6 / MAUSRAD', 'JETON-WERT'],
+    ['LEERTASTE', 'DREHEN, HALTEN = SCHNELLER'],
+    ['R / C', 'WIEDERHOLEN / ABRÄUMEN'],
+    ['V', 'RAD MIT WAHRSCHEINLICHKEITEN'],
+    ['PFEILE + ENTER', 'IN MENÜS'],
+    ['M', 'TON AN/AUS'],
+  ];
+  return h('div', { class: 'menu', style: 'width:min(820px,100%)' },
+    head('STEUERUNG'),
+    h('div', { class: 'rows' }, ...lines.map(([k, v]) => h('div', { class: 'stat' }, h('span', { text: k }), h('span', { text: v })))),
+    h('div', { class: 'rows' }, row('ZURÜCK', 'ESC', back)),
+  );
+}
+
+export function gameOverView(run: Run, rewind: () => void): HTMLElement {
+  return h('div', { class: 'caught' },
+    h('div', { style: 'font-size:34px', text: '■ STOP' }),
+    h('h1', { text: 'ERWISCHT.' }),
+    h('div', { style: 'font-size:28px', html: `DIE GELDEINTREIBER WOLLTEN ${fmt(run.debt)}. DU HATTEST ${fmt(run.cash + run.deposit)}.` }),
+    h('div', { style: 'font-size:24px;opacity:.85', html: `RATEN ${run.paidRates} · RUNDEN ${run.stats.spins} · BESTER GEWINN ${fmt(run.stats.bestWin)} · NACHHOPSER ${run.stats.hops}` }),
+    h('div', { class: 'rows' }, row('◀◀ ZURÜCKSPULEN', '', rewind)),
   );
 }
 
 export function victoryView(run: Run, endless: () => void, restart: () => void): HTMLElement {
-  return h('div', { class: 'panel dialog', style: 'max-width:560px' },
-    h('h1', { text: 'Frei!' }),
-    h('p', { style: 'font-size:17px', html: `Alle ${DEBTS.length} Raten bezahlt. Die Geldeintreiber nicken dir zu und verschwinden in der Nacht.` }),
-    h('div', { class: 'lifetime', html: `<span>Runden <b>${run.stats.spins}</b></span><span>Bester Gewinn <b>${fmt(run.stats.bestWin)}</b></span><span>Bargeld <b>${fmt(run.cash)}</b></span>` }),
-    h('div', { class: 'row', style: 'margin-top:18px' },
-      h('button', { onclick: endless, text: 'Weiterspielen (endlos)' }),
-      h('button', { class: 'ghost', onclick: restart, text: 'Neues Spiel' }),
-    ),
+  return h('div', { class: 'caught' },
+    h('div', { style: 'font-size:34px', text: '■ ENDE DER AUFNAHME' }),
+    h('h1', { style: 'color:var(--money)', text: 'FREI.' }),
+    h('div', { style: 'font-size:28px', text: `ALLE ${DEBTS.length} RATEN BEZAHLT. DIE HERREN NICKEN UND GEHEN.` }),
+    h('div', { style: 'font-size:24px;opacity:.85', text: run.stage < 5 ? `SCHULDENSTUFE ${run.stage + 1} IST JETZT FREIGESCHALTET.` : 'DU HAST DIE HÖCHSTE SCHULDENSTUFE GESCHAFFT.' }),
+    h('div', { class: 'rows' }, row('▶ WEITERSPIELEN (ENDLOS)', '', endless), row('◀◀ NEUES BAND', '', restart)),
   );
 }

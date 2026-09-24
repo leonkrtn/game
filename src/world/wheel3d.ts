@@ -45,8 +45,8 @@ export class Wheel3D {
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = 8;
 
-    const wood = new THREE.MeshStandardMaterial({ color: 0x3b1d0c, roughness: 0.45, metalness: 0.1 });
-    const brass = new THREE.MeshStandardMaterial({ color: 0xd9ae4c, roughness: 0.25, metalness: 0.9 });
+    const wood = new THREE.MeshPhysicalMaterial({ color: 0x3b1a0a, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08 });
+    const brass = new THREE.MeshStandardMaterial({ color: 0xd6ad52, roughness: 0.18, metalness: 1 });
 
     // Pedestal and bowl.
     const pedestal = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 5, 1.2, 64), wood);
@@ -82,7 +82,7 @@ export class Wheel3D {
     // Rotor: textured disc, 3D separators and the center turret.
     const disc = new THREE.Mesh(
       new THREE.CircleGeometry(WHEEL_RADII.disc, 128),
-      new THREE.MeshStandardMaterial({ map: this.texture, roughness: 0.35, metalness: 0.15 }),
+      new THREE.MeshPhysicalMaterial({ map: this.texture, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.05 }),
     );
     disc.rotation.x = -Math.PI / 2;
     disc.position.y = DISC_Y;
@@ -114,7 +114,7 @@ export class Wheel3D {
 
     this.ball = new THREE.Mesh(
       new THREE.SphereGeometry(BALL_R, 24, 16),
-      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.15, metalness: 0.1 }),
+      new THREE.MeshPhysicalMaterial({ color: 0xf6f0e2, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 }),
     );
     this.ball.visible = false;
 
