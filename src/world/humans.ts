@@ -2,8 +2,27 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
-/** Model file name: binary glTF normally, embedded glTF JSON in the single-file build (hosts that only serve web types). */
-export const modelFile = (name: string): string => name + (import.meta.env.MODE === 'single' ? '.gltf.json' : '.glb');
+const SINGLE = import.meta.env.MODE === 'single';
+
+/**
+ * Loads a glTF model. The single-file build ships models as base64 text (hosts that only serve
+ * web file types and forbid fetching data: URLs), decoded here and parsed in memory.
+ */
+export async function loadModel(base: string, name: string): Promise<GLTF> {
+  const loader = new GLTFLoader();
+  if (!SINGLE) return loader.loadAsync(base + name + '.glb');
+  // Decode embedded textures through <img> instead of fetch(), which strict CSPs may block.
+  loader.register((parser) => {
+    (parser as unknown as { textureLoader: THREE.TextureLoader }).textureLoader = new THREE.TextureLoader(parser.options.manager);
+    return { name: 'img_textures' };
+  });
+  const res = await fetch(base + name + '.glb.txt');
+  if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
+  const bin = atob((await res.text()).trim());
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return loader.parseAsync(bytes.buffer, base);
+}
 
 
 /** Rigged people: a man in a suit (Ready Player Me), animated with Mixamo clips retargeted offline. */
@@ -38,8 +57,7 @@ export interface HumanStyle {
 }
 
 export async function loadHumanAssets(base: string): Promise<HumanAssets> {
-  const loader = new GLTFLoader();
-  const load = (f: string) => loader.loadAsync(base + f);
+  const load = (f: string) => loadModel(base, f);
   const clipsOf = async (kind: HumanKind) => {
     const res = await fetch(`${base}clips-${kind}.json`);
     const list = (await res.json()) as unknown[];
@@ -49,8 +67,8 @@ export async function loadHumanAssets(base: string): Promise<HumanAssets> {
     }));
   };
   // Sequential on purpose: some browsers fail to decode many embedded textures at once.
-  const man = await load(modelFile('man'));
-  const sunglasses = await load(modelFile('sunglasses')).catch(() => undefined);
+  const man = await load('man');
+  const sunglasses = await load('sunglasses').catch(() => undefined);
   const manClips = await clipsOf('man');
   return { man, sunglasses, clips: { man: manClips } };
 }

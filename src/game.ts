@@ -81,9 +81,14 @@ export class Game {
 
   private async boot(): Promise<void> {
     const loading = document.getElementById('loading');
-    await this.world.init(import.meta.env.BASE_URL + 'assets/', (text) => {
-      if (loading) loading.textContent = text;
-    });
+    try {
+      await this.world.init(import.meta.env.BASE_URL + 'assets/', (text) => {
+        if (loading) loading.textContent = text;
+      });
+    } catch (e) {
+      if (loading) loading.textContent = `BANDFEHLER: ${(e as Error).message ?? e}`;
+      throw e;
+    }
     loading?.remove();
     this.syncWorld();
     this.showStart();
