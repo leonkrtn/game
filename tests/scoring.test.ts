@@ -188,7 +188,7 @@ describe('Run', () => {
     expect(run.placeBet('black', 5)).toBe(false);
     const r = run.spin();
     run.settle();
-    if (r.anyWin) expect(run.cash).toBe(60 + 20 + 20 * 2 * 2);
+    if (r.anyWin) expect(run.cash).toBe(60 + 10 + 20 * 2 * 2);
     else expect(run.cash).toBe(60);
   });
 
@@ -237,5 +237,96 @@ describe('Run', () => {
     expect(hop).toBeTruthy();
     expect(run.wheel[hop!.to].number).toBe(17);
     expect(Math.abs(hop!.to - hop!.from) % 35).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('shown odds match the real spin', () => {
+  const scenarios: [string, (r: Run) => void][] = [
+    ['plain red', (r) => r.placeBet('red', 10)],
+    ['luck and a plein', (r) => { r.perks.luck = 6; r.placeBet('n17', 10); r.placeBet('doz1', 10); }],
+    ['voodoo and golden ball', (r) => {
+      r.perks.luck = 8;
+      r.items.push({ uid: 90, def: 'voodoo', counter: 0 }, { uid: 91, def: 'goldkugel', counter: 0 });
+      r.placeBet('n4', 10); r.placeBet('red', 10);
+    }],
+    ['bribe and crystal ball', (r) => {
+      r.items.push({ uid: 92, def: 'kristallkugel', counter: 0 });
+      r.visions = [3, 10, 20];
+      r.placeBet('black', 20);
+      r.bribed = true;
+    }],
+  ];
+  for (const [name, setup] of scenarios) {
+    it(name, () => {
+      const run = new Run({ seed: 21 });
+      run.news = '';
+      run.rule = undefined;
+      run.cash = 1e6;
+      setup(run);
+      const want = run.outlook();
+      const fin = run.finalChances();
+      expect(fin.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 9);
+      const snapshot = { bets: structuredClone(run.bets), bribed: run.bribed, visions: [...run.visions] };
+      let back = 0, wins = 0;
+      const N = 30000;
+      for (let i = 0; i < N; i++) {
+        run.phase = 'betting';
+        run.bets = structuredClone(snapshot.bets);
+        run.bribed = snapshot.bribed;
+        run.bribesThisCycle = -1; // no risk of being seen, and no price, for this check
+        run.visions = [...snapshot.visions];
+        const cash = run.cash;
+        const r = run.spin();
+        run.cash = cash;
+        back += r.payout;
+        if (r.anyWin) wins++;
+      }
+      const stake = Object.values(snapshot.bets).flat().reduce((a, b) => a + b, 0);
+      expect(Math.abs(wins / N - want.pWin)).toBeLessThan(0.012);
+      expect(Math.abs((back / N - stake) / stake - want.ev / stake)).toBeLessThan(0.06);
+    }, 120000);
+  }
+});
+
+describe('fair play', () => {
+  it('refunds never exceed 90 % of a lost stake', () => {
+    const run = new Run({ seed: 30 });
+    run.cash = 1000;
+    run.items = [{ uid: 1, def: 'police', counter: 0, gold: true }, { uid: 2, def: 'spiegel', counter: 0 }, { uid: 3, def: 'police', counter: 0 }];
+    run.boost.kaugummi = true;
+    run.placeBet('n17', 100);
+    const input = (run as any).input(false);
+    const lose = run.wheel.findIndex((p) => p.number === 0);
+    const r = scoreSpin(input, lose);
+    expect(r.payout).toBe(90);
+  });
+
+  it('sitting a duel out loses it', () => {
+    const run = new Run({ seed: 31 });
+    run.duel = { name: 'X', fieldId: 'red', stake: 10 };
+    run.spin();
+    run.settle();
+    expect(run.lastDuel?.outcome).toBe('lost');
+  });
+
+  it('a bribe without stakes costs nothing and cannot be seen', () => {
+    const run = new Run({ seed: 32 });
+    run.placeBet('red', 5);
+    run.bribe();
+    run.clearBets();
+    const debt = run.debt;
+    const cash = run.cash;
+    run.spin();
+    expect(run.bribeCaught).toBe(false);
+    expect(run.cash).toBe(cash);
+    expect(run.debt).toBe(debt);
+  });
+
+  it('the mirror copies pocket watches and piggy banks', () => {
+    const run = new Run({ seed: 33 });
+    run.items = [{ uid: 1, def: 'sparschwein', counter: 0 }];
+    const one = run.interestRate;
+    run.items.unshift({ uid: 2, def: 'spiegel', counter: 0 });
+    expect(run.interestRate).toBeCloseTo(one + 0.04, 9);
   });
 });

@@ -35,10 +35,9 @@ export function setInfo(run: Run, def: string): string {
 
 export const rarityClass = (def: string) => `rar-${ITEMS[def].rarity}`;
 
-/** Chance (0..1) that a bet on `fieldId` wins this round. */
-export function fieldChance(run: Run, fieldId: string): number {
+/** Chance (0..1) that a bet on `fieldId` wins this spin, lucky hops included. */
+export function fieldChance(run: Run, fieldId: string, ch = run.finalChances()): number {
   const f = FIELD_BY_ID[fieldId];
-  const ch = run.chances();
   let win = 0;
   run.wheel.forEach((p, i) => {
     if (fieldWins(f, p) && !(f.kind === 'red' && run.activeRule === 'rotfluch')) win += ch[i];
@@ -78,7 +77,7 @@ export function renderOsd(run: Run, cash: number, tape: number): void {
   const left = h('div', { class: 'left' },
     h('div', { class: 'play', html: '▶ PLAY <span style="font-size:24px">SP</span>' }),
     h('div', { class: 'line', html: `${rateNo} <span class="debt">${fmt(run.debt)}</span>  ${due ? '<span class="warn">JETZT FÄLLIG</span>' : run.roundsLeft === 0 ? 'ALLE DREHS GESPIELT' : `DREH ${run.round}/${run.cycleRounds}`}` }),
-    h('div', { class: 'line', html: `KASSE <span class="debt">${fmt(run.deposit)}</span>  ${covered ? '<span class="money">GEDECKT</span>' : `FEHLT ${fmt(run.debt - run.deposit - run.cash)}`}` }),
+    h('div', { class: 'line', html: `KASSE <span class="debt">${fmt(run.deposit)}</span>  ${run.deposit >= run.debt ? '<span class="money">RATE GEDECKT</span>' : covered ? `NOCH ${fmt(run.debt - run.deposit)} – BARGELD REICHT` : `<span class="warn-soft">FEHLT ${fmt(run.debt - run.deposit - run.cash)}</span>`}` }),
     h('div', { class: 'line', html: `BARGELD <span class="money">${fmt(cash)}</span>${run.stakeTotal ? `  IM SPIEL ${fmt(run.stakeTotal)}` : ''}` }),
     h('div', { class: 'line', html: `<span class="marks">◆${run.marks}</span>  <span class="luck">GLÜCK ${run.luck}</span>  ZINS ${pct(run.interestRate)}  TALISMANE ${run.items.length}/${run.perks.slots}` }),
     run.news ? h('div', { class: 'line news', html: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }) : null,
@@ -177,13 +176,15 @@ export function renderTableBar(run: Run, selected: number, hd: TableHandlers, bu
   );
   const extra = h('div', { class: 'extra' },
     h('button', {
-      onclick: hd.bribe, disabled: busy || run.bribed || run.cash < run.bribePrice,
+      onclick: hd.bribe, disabled: busy || (!run.bribed && (run.stakeTotal === 0 || run.cash < run.bribePrice)),
       class: run.bribed ? 'on' : '',
-      html: run.bribed ? '<kbd>B</kbd> CROUPIER BESTOCHEN' : `<kbd>B</kbd> BESTECHEN ${fmt(run.bribePrice)} · RISIKO ${pct(run.bribeRisk)}`,
+      html: run.bribed
+        ? `<kbd>B</kbd> BESTOCHEN · ${fmt(run.bribePrice)} BEIM DREHEN`
+        : run.stakeTotal === 0 ? '<kbd>B</kbd> BESTECHEN (ERST SETZEN)' : `<kbd>B</kbd> BESTECHEN ${fmt(run.bribePrice)} · RISIKO ${pct(run.bribeRisk)}`,
     }),
     run.roundsLeft === 1 ? h('button', {
       onclick: hd.risk, disabled: busy || !run.canHighRisk, class: run.highRisk ? 'on risk' : 'risk',
-      html: run.highRisk ? '<kbd>H</kbd> HOCHRISIKO AN · ×2 MULT' : `<kbd>H</kbd> HOCHRISIKO: EINSATZ VERDOPPELN, ×2 MULT`,
+      html: run.highRisk ? `<kbd>H</kbd> HOCHRISIKO AN · ×2 MULT · ZUSCHLAG ${fmt(run.riskStake)}` : `<kbd>H</kbd> HOCHRISIKO: ZUSCHLAG ${fmt(run.stakeTotal)}, ×2 MULT`,
     }) : null,
     ...run.smokes.map((id, i) => h('button', { onclick: () => hd.smoke(i), disabled: busy, title: CONSUMABLES[id].desc, html: `<kbd>${7 + i}</kbd> ${CONSUMABLES[id].name.toUpperCase()}` })),
   );
@@ -214,7 +215,7 @@ export function renderSlip(run: Run, show: boolean): void {
   box.classList.remove('hidden');
   const rows: HTMLElement[] = [h('div', { class: 'title', text: `WETTSCHEIN · DREH ${run.round}/${run.cycleRounds}` })];
   const bets = Object.entries(run.bets);
-  const ch = run.chances();
+  const ch = run.finalChances();
   if (!bets.length) {
     rows.push(h('div', { class: 'hint', text: 'Klick aufs Feld setzt den gewählten Jeton. Auch Linien und Ecken zwischen Zahlen sind Wetten (Cheval, Carré …).' }));
   }
@@ -226,25 +227,17 @@ export function renderSlip(run: Run, show: boolean): void {
     rows.push(h('div', { class: 'bet' },
       h('span', { class: 'n', text: name }),
       h('span', { text: fmt(stake) }),
-      h('span', { class: 'c', text: pct(fieldChance(run, fid)) }),
+      h('span', { class: 'c', text: pct(fieldChance(run, fid, ch)) }),
       h('span', { class: 'w', text: `→ ${fmt(stake * payout)}` }),
     ));
   }
   if (bets.length) {
-    // Chance that at least one bet pays, and the best single outcome before talismans.
-    let anyWin = 0;
-    let best = 0;
-    run.wheel.forEach((p, i) => {
-      let back = 0;
-      for (const [fid, stack] of bets) {
-        const f = FIELD_BY_ID[fid];
-        if (fieldWins(f, p) && !(f.kind === 'red' && run.activeRule === 'rotfluch')) back += stack.reduce((a, b) => a + b, 0) * (f.kind === 'straight' && run.activeRule === 'halbzahl' ? 18 : f.payout);
-      }
-      if (back > 0) anyWin += ch[i];
-      best = Math.max(best, back);
-    });
-    rows.push(h('div', { class: 'sum' }, h('span', { text: `EINSATZ ${fmt(run.stakeTotal)}` }), h('span', { text: `TRIFFT ${pct(anyWin)}` })));
-    rows.push(h('div', { class: 'hint', text: `Bester Fall ohne Talismane: ${fmt(best)} zurück. Talismane erhöhen den Mult – der Gewinn ist Summe × Mult.` }));
+    // Exact outlook with every talisman, boost, hop and house rule counted.
+    const o = run.outlook();
+    const ev = Math.round(o.ev);
+    rows.push(h('div', { class: 'sum' }, h('span', { text: `EINSATZ ${fmt(run.stakeTotal + run.riskStake)}` }), h('span', { text: `TRIFFT ${pct(o.pWin)}` })));
+    rows.push(h('div', { class: 'ev ' + (ev >= 0 ? 'plus' : 'minus'), text: `IM SCHNITT ${ev >= 0 ? '+' : '−'}${fmt(Math.abs(ev))} PRO DREH (${ev >= 0 ? '+' : '−'}${pct(Math.abs(o.ev) / Math.max(1, run.stakeTotal + run.riskStake))})` }));
+    rows.push(h('div', { class: 'hint', text: 'Gewinn = Summe × Mult. Talismane erhöhen den Mult. Ohne Talismane verliert Roulette im Schnitt 2,7 %.' }));
   }
   const boosts = boostLabels(run);
   if (boosts.length) rows.push(h('div', { class: 'boost', text: 'AKTIV: ' + boosts.join(' · ') }));
@@ -271,7 +264,7 @@ export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number
   const stake = (run.bets[fieldId] ?? []).reduce((a, b) => a + b, 0);
   box.replaceChildren(
     h('b', { text: f.kind === 'straight' ? `PLEIN ${f.label}` : f.numbers.length ? `${KIND_NAME[f.kind]} ${f.label}` : f.label }),
-    h('div', { text: `ZAHLT ×${payout} · CHANCE ${pct(fieldChance(run, fieldId))}${run.cubeField === fieldId ? ' · VERDREHT ×3' : ''}` }),
+    h('div', { text: `QUOTE ${payout - 1}:1 (×${payout} ZURÜCK) · CHANCE ${pct(fieldChance(run, fieldId))}${run.cubeField === fieldId ? ' · VERDREHT ×3' : ''}` }),
   );
   if (stake) box.append(h('div', { text: `GESETZT ${fmt(stake)} · RECHTSKLICK ZURÜCK` }));
   box.style.left = `${x}px`;

@@ -52,8 +52,8 @@ export function kasseView(run: Run, hd: KasseHandlers): HTMLElement {
         row('ZURÜCK', 'ESC', hd.close),
       ),
       h('div', { class: 'rows' },
-        label(`EINZAHLEN · ${pct(run.interestRate)} ZINSEN PRO RUNDE`),
-        h('div', { class: 'info', text: 'Eingezahltes Geld ist sicher vor dem Tisch und wächst nach jeder Runde. Zurück bekommst du es nicht – es gehört der Rate.' }),
+        label(`EINZAHLEN · ${pct(run.interestRate)} ZINSEN PRO DREH`),
+        h('div', { class: 'info', text: 'Eingezahltes Geld ist sicher vor dem Tisch und wächst nach jedem Dreh. Zurück bekommst du es nicht – es gehört der Rate.' }),
         missing > 0 ? dep('BIS ZUR RATE', Math.min(missing, cash)) : h('div', { class: 'info money-c', text: 'Die Rate ist durch deine Einzahlung gedeckt.' }),
         dep('+ $10', 10),
         dep('+ 25 %', cash * 0.25),
@@ -174,7 +174,7 @@ export function wheelView(run: Run, close: () => void, upgrade?: { index: number
         class: 'info',
         text: def
           ? chosen ? `Welche Zahl soll das Fach „${chosen.number}" bekommen?` : `${def.desc} Klicke auf ein Fach.`
-          : 'Reihenfolge wie auf dem echten Rad. Die Prozente zeigen, wie oft die Kugel in dieser Runde in jedem Fach landet.',
+          : 'Reihenfolge wie auf dem echten Rad. Die Prozente zeigen, wie oft die Kugel bei diesem Dreh in jedem Fach landet.',
       }),
     );
     if (chosen && def?.id === 'pinsel') {
@@ -332,7 +332,8 @@ export function victoryView(run: Run, endless: () => void, restart: () => void):
 export function rateReasons(run: Run): string {
   const r: string[] = [`Grundrate ${fmt(run.baseDebt)}`];
   const voodoo = run.items.find((t) => t.def === 'voodoo');
-  if (run.has('teufel')) r.push('Teufel +25 %');
+  const devils = run.active('teufel').length;
+  if (devils) r.push(`Teufel +25 %${devils > 1 ? ` ×${devils}` : ''}`);
   if (voodoo) r.push(`Voodoo −${voodoo.gold ? 25 : 15} %`);
   if (run.stage >= 1) r.push('Stufe +25 %');
   if (run.items.length && SETS.find((x) => x.id === 'bank')!.items.every((d) => run.has(d))) r.push('Schweizer Konto −10 %');

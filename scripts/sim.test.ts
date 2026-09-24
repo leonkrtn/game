@@ -13,6 +13,8 @@ interface Bot {
   shop: boolean;
   early: boolean;
   shark?: boolean;
+  /** Plays the last spin of every rate as high risk. */
+  risk?: boolean;
 }
 
 const PREFS = ['pfennig', 'kerze', 'hufeisen', 'sanduhr', 'sparschwein', 'katze', 'zinnsoldat', 'wuerfel', 'abakus', 'glocke', 'teufel', 'goldkugel', 'zigarre', 'police'];
@@ -35,6 +37,7 @@ function round(run: Run, bot: Bot): void {
   const free = Math.max(0, run.cash - Math.max(0, run.debt - run.deposit) * 0.5);
   const stake = Math.floor(free * bot.f);
   if (stake > 0) run.placeBet('red', stake);
+  if (bot.risk && run.roundsLeft === 1) run.setHighRisk(true);
   run.spin();
   run.settle();
 }
@@ -63,6 +66,8 @@ it('balance', () => {
     { name: 'Sparer 30/50 +Shop', f: 0.5, save: 0.3, shop: true, early: false },
     { name: 'Sparer 15/60 +Shop', f: 0.6, save: 0.15, shop: true, early: false },
     { name: 'Rot 60% +Shop +Hai', f: 0.6, shop: true, early: false, shark: true },
+    { name: 'Rot 30% +Shop +Risiko', f: 0.3, shop: true, early: false, risk: true },
+    { name: 'Rot 30% +Shop +Hai+Ris', f: 0.3, shop: true, early: false, risk: true, shark: true },
   ];
   for (const bot of bots) {
     const N = 3000;

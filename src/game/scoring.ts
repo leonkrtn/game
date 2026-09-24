@@ -89,6 +89,9 @@ export interface SpinResult {
   hop?: { from: number; to: number };
 }
 
+/** Most of a lost stake that refunds can give back. */
+export const MAX_REFUND = 0.9;
+
 export const stakeOf = (stack: number[] | undefined) => (stack ?? []).reduce((a, b) => a + b, 0);
 
 /** Items in table order; the mirror borrows its right neighbour's effect. */
@@ -206,7 +209,7 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   const add = (text: string, amount: number, item?: number) => {
     if (amount === 0 || !anyWin) return;
     mult += amount;
-    lines.push({ kind: 'add', text: `${text} +${fmtMult(amount)}`, amount, item });
+    lines.push({ kind: 'add', text: `${text} ${amount < 0 ? '−' : '+'}${fmtMult(Math.abs(amount))}`, amount, item });
   };
   const glass = input.ball === 'glas';
   if (pocket.color === 'red') add('Rote Tinte', perks.redMult);
@@ -298,22 +301,20 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   // 4. Money and marks.
   let payout = Math.floor(sum * mult);
   if (!anyWin && stake > 0) {
+    // Refunds never add up to more than 90 % of the stake: losing must still cost something.
+    let left = Math.floor(stake * MAX_REFUND);
+    const refund = (name: string, share: number, item?: number) => {
+      const back = Math.min(left, Math.floor(stake * share));
+      if (back <= 0) return;
+      left -= back;
+      payout += back;
+      lines.push({ kind: 'money', text: `${name}: ${Math.round((back / stake) * 100)} % zurück`, amount: back, item });
+    };
     for (const x of active) {
       if (x.inst.def !== 'police') continue;
-      const share = levelOf(x) === 2 ? 0.6 : 0.3;
-      const back = Math.floor(stake * share);
-      if (back > 0) {
-        payout += back;
-        lines.push({ kind: 'money', text: `${ITEMS[x.src.def].name}: ${share * 100} % zurück`, amount: back, item: x.src.uid });
-      }
+      refund(ITEMS[x.src.def].name, levelOf(x) === 2 ? 0.6 : 0.3, x.src.uid);
     }
-    if (input.boost?.kaugummi) {
-      const back = Math.floor(stake / 2);
-      if (back > 0) {
-        payout += back;
-        lines.push({ kind: 'money', text: 'Kaugummi: 50 % zurück', amount: back });
-      }
-    }
+    if (input.boost?.kaugummi) refund('Kaugummi', 0.5);
   }
   let marks = 0;
   if (pocket.mod === 'gold') {
@@ -322,7 +323,7 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     lines.push({ kind: 'marks', text: `${POCKET_MOD_INFO.gold.name}fach`, amount: m });
   }
   if (input.ball === 'kupfer') {
-    const n = winners.filter((w) => FIELD_BY_ID[w.fieldId].kind === 'straight').length;
+    const n = winners.filter((w) => FIELD_BY_ID[w.fieldId].kind === 'straight' && w.payout >= 18).length;
     if (n) {
       marks += n;
       lines.push({ kind: 'marks', text: 'Kupferkugel', amount: n });

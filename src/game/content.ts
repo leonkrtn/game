@@ -32,15 +32,15 @@ export const ITEMS: Record<string, ItemDef> = Object.fromEntries([
   I('sparschwein', 'Sparschwein', 'common', 'Zinsen auf deine Einzahlung +4 %.'),
   I('kleeblatt', 'Kleeblatt im Topf', 'common', 'Jede bezahlte Rate: +2 Glücksmarken.'),
   I('sanduhr', 'Sanduhr', 'common', 'Letzter Dreh vor der Rate: ×2 Mult.'),
-  I('glocke', 'Messingglocke', 'common', 'Jede Runde mit Gewinn: dauerhaft +0,2 Mult (aktuell +{n}).'),
-  I('rabe', 'Rabe', 'common', 'Jede Runde ohne Gewinn: dauerhaft +0,5 Mult (aktuell +{n}).'),
+  I('glocke', 'Messingglocke', 'common', 'Jeder Dreh mit Gewinn: dauerhaft +0,2 Mult (aktuell +{n}).'),
+  I('rabe', 'Rabe', 'common', 'Jeder Dreh ohne Gewinn: dauerhaft +0,5 Mult (aktuell +{n}).'),
   I('zinnsoldat', 'Zinnsoldat', 'common', 'Liegen Einsätze auf mindestens 4 Feldern: +1 Mult.'),
   I('totenkopf', 'Totenkopf', 'rare', 'Kugel auf 0: ×6 Mult. Die 0 zieht die Kugel stärker an.'),
   I('winkekatze', 'Winkekatze', 'rare', 'Gewinnt ein Plein (Einzelzahl): ×2 Mult.'),
   I('magnet', 'Hufeisenmagnet', 'rare', 'Fächer mit deinen Plein-Zahlen ziehen die Kugel an (Gewicht ×2).'),
   I('taschenuhr', 'Taschenuhr', 'rare', '+1 Dreh vor jeder Rate.'),
   I('goldbarren', 'Goldbarren', 'rare', 'Kugel in einem Goldfach: ×2 Mult.'),
-  I('police', 'Versicherungspolice', 'rare', 'Gewinnst du in einer Runde nichts, bekommst du 30 % deiner Einsätze zurück.'),
+  I('police', 'Versicherungspolice', 'rare', 'Gewinnst du bei einem Dreh nichts, bekommst du 30 % deiner Einsätze zurück.'),
   I('zigarre', 'Zigarre', 'rare', 'Setzt du mindestens die Hälfte deines Bargelds: ×1,5 Mult.'),
   I('fernglas', 'Opernglas', 'rare', 'Gewinnt ein Cheval, Carré, eine Transversale oder Sechserreihe: +2 Mult.'),
   I('spiegel', 'Handspiegel', 'rare', 'Kopiert die Wirkung des Talismans rechts daneben.'),
@@ -48,13 +48,13 @@ export const ITEMS: Record<string, ItemDef> = Object.fromEntries([
   I('pager', 'Pager', 'common', 'Knapp daneben zählt: Pleins direkt neben der Kugel zahlen ×8.'),
   I('zippo', 'Zippo', 'common', 'Nach zwei verlorenen Runden in Folge: ×2 Mult.'),
   I('hasenpfote', 'Hasenpfote', 'common', 'Glück +1 für jeden freien Platz auf deinem Tisch.'),
-  I('kassette', 'Mixtape', 'common', 'Setzt du genau wie in der Runde davor: +1 Mult.'),
-  I('zauberwuerfel', 'Zauberwürfel', 'rare', 'Jede Runde ist ein Außenfeld verdreht (lila markiert). Gewinnt eine Wette darauf: ×3 Mult.'),
-  I('polaroid', 'Polaroid', 'rare', 'Fällt dieselbe Zahl wie in der Runde davor: ×5 Mult.'),
+  I('kassette', 'Mixtape', 'common', 'Setzt du genau wie beim Dreh davor: +1 Mult.'),
+  I('zauberwuerfel', 'Zauberwürfel', 'rare', 'Bei jedem Dreh ist ein Außenfeld verdreht (lila markiert). Gewinnt eine Wette darauf: ×3 Mult.'),
+  I('polaroid', 'Polaroid', 'rare', 'Fällt dieselbe Zahl wie beim Dreh davor: ×5 Mult.'),
   I('voodoo', 'Voodoo-Puppe', 'rare', 'Jede Rate ist 15 % niedriger. Aber jeder dritte Nachhopser springt gegen dich.'),
   I('goldkette', 'Goldkettchen', 'rare', '+0,1 Mult pro $50 Bargeld vor dem Einsatz (höchstens +3).'),
   I('sonnenbrille', 'Sonnenbrille', 'legendary', 'Hausregeln gelten für dich nicht.'),
-  I('kristallkugel', 'Kristallkugel', 'legendary', 'Zeigt jede Runde 3 Fächer. Mit 40 % Chance landet die Kugel in einem davon.'),
+  I('kristallkugel', 'Kristallkugel', 'legendary', 'Zeigt vor jedem Dreh 3 Fächer. Mit 40 % Chance landet die Kugel in einem davon.'),
   I('goldkugel', 'Goldene Kugel', 'legendary', 'Glück +3. Nachhopser können bis zu zwei Fächer weit springen.', 3),
   I('teufel', 'Teufelsfigur', 'legendary', '×2 Mult auf jeden Gewinn. Jede Rate ist 25 % höher.'),
 ].map((d) => [d.id, d]));
@@ -99,7 +99,7 @@ export const RULES: Record<RuleId, { id: RuleId; name: string; desc: string }> =
   eile: { id: 'eile', name: 'Rien ne va plus!', desc: 'Am Tisch hast du nur 15 Sekunden zum Setzen, dann dreht der Croupier.' },
   rotfluch: { id: 'rotfluch', name: 'Roter Fluch', desc: 'Wetten auf Rot verlieren immer.' },
   geiz: { id: 'geiz', name: 'Ungeduldige Gläubiger', desc: 'Die Rate ist einen Dreh früher fällig.' },
-  limit: { id: 'limit', name: 'Tischlimit', desc: 'Du darfst pro Runde höchstens ein Viertel deines Bargelds setzen.' },
+  limit: { id: 'limit', name: 'Tischlimit', desc: 'Du darfst pro Dreh höchstens ein Viertel deines Bargelds setzen.' },
   halbzahl: { id: 'halbzahl', name: 'Halbe Sache', desc: 'Pleins (Einzelzahlen) zahlen nur ×18.' },
   nullnebel: { id: 'nullnebel', name: 'Hungrige Null', desc: 'Fächer mit der 0 ziehen die Kugel stark an (Gewicht ×4).' },
 };
@@ -119,10 +119,10 @@ export const OFFERS: Record<string, OfferDef> = {
   platz: { id: 'platz', name: 'Mehr Platz am Tisch', desc: '+1 Platz für Talismane.', weight: 2 },
   marken: { id: 'marken', name: 'Ein Bündel Marken', desc: '+4 Glücksmarken.', weight: 3 },
   runde: { id: 'runde', name: 'Mehr Zeit', desc: '+1 Dreh vor jeder Rate, dauerhaft.', weight: 1 },
-  kredit: { id: 'kredit', name: 'Frisches Geld', desc: 'Sofort Bargeld in Höhe der halben nächsten Rate. Die nächste Rate steigt um das Doppelte davon.', weight: 2 },
-  stundung: { id: 'stundung', name: 'Stundung', desc: 'Die nächste Rate sinkt um 30 %, die übernächste steigt um 60 %.', weight: 2 },
-  rotplus: { id: 'rotplus', name: 'Rote Tinte', desc: 'Kugel auf Rot: +0,25 Mult, dauerhaft.', weight: 2 },
-  schwarzplus: { id: 'schwarzplus', name: 'Schwarzes Buch', desc: 'Kugel auf Schwarz: +0,25 Mult, dauerhaft.', weight: 2 },
+  kredit: { id: 'kredit', name: 'Frisches Geld', desc: 'Sofort Bargeld in Höhe der halben nächsten Rate. Die nächste Rate steigt um das Anderthalbfache davon.', weight: 2 },
+  stundung: { id: 'stundung', name: 'Stundung', desc: 'Die nächste Rate sinkt um 30 %, die übernächste steigt um 15 %.', weight: 2 },
+  rotplus: { id: 'rotplus', name: 'Rote Tinte', desc: 'Kugel auf Rot: +0,5 Mult, dauerhaft.', weight: 2 },
+  schwarzplus: { id: 'schwarzplus', name: 'Schwarzes Buch', desc: 'Kugel auf Schwarz: +0,5 Mult, dauerhaft.', weight: 2 },
   goldfach: { id: 'goldfach', name: 'Ein Geschenk', desc: 'Ein zufälliges Fach wird zum Goldfach.', weight: 2 },
   kristallfach: { id: 'kristallfach', name: 'Ein Kristall', desc: 'Ein zufälliges Fach wird zum Kristallfach.', weight: 2 },
 };
@@ -239,12 +239,12 @@ export interface ConsumableDef {
 }
 
 export const CONSUMABLES: Record<string, ConsumableDef> = Object.fromEntries([
-  { id: 'zigarette', name: 'Glückszigarette', desc: 'Nächster Dreh: Glück +4.', price: 0.15 },
-  { id: 'gezinkt', name: 'Gezinkte Kugel', desc: 'Nächster Dreh: Die Kugel hüpft sicher ins beste Nachbarfach.', price: 0.35 },
-  { id: 'kreide', name: 'Blaue Kreide', desc: 'Nächster Dreh: Fächer mit deinen Plein-Zahlen ziehen dreifach an.', price: 0.25 },
+  { id: 'zigarette', name: 'Glückszigarette', desc: 'Nächster Dreh: Glück +4.', price: 0.1 },
+  { id: 'gezinkt', name: 'Gezinkte Kugel', desc: 'Nächster Dreh: Die Kugel hüpft sicher ins beste Nachbarfach.', price: 0.45 },
+  { id: 'kreide', name: 'Blaue Kreide', desc: 'Nächster Dreh: Fächer mit deinen Plein-Zahlen ziehen dreifach an.', price: 0.5 },
   { id: 'espresso', name: 'Doppelter Espresso', desc: 'Sofort: +1 Dreh vor dieser Rate.', price: 0.4 },
-  { id: 'kaugummi', name: 'Kaugummi', desc: 'Nächster Dreh: Verlierst du, kommt die Hälfte deiner Einsätze zurück.', price: 0.15 },
-  { id: 'korn', name: 'Doppelkorn', desc: 'Nächster Dreh: +2 Mult bei Gewinn.', price: 0.2 },
+  { id: 'kaugummi', name: 'Kaugummi', desc: 'Nächster Dreh: Verlierst du, kommt die Hälfte deiner Einsätze zurück.', price: 0.1 },
+  { id: 'korn', name: 'Doppelkorn', desc: 'Nächster Dreh: +2 Mult bei Gewinn.', price: 0.6 },
   { id: 'rubbellos', name: 'Rubbellos', desc: 'Sofort: 1 zu 3 auf das Dreifache des Preises.', price: 0.12 },
 ].map((c) => [c.id, c]));
 
@@ -264,7 +264,7 @@ export const NEWS: Record<string, NewsDef> = Object.fromEntries([
   { id: 'hitze', headline: 'HITZEWELLE ÜBER DER STADT', desc: 'Kugel auf Rot: +1 Mult.' },
   { id: 'nebel', headline: 'DICHTER NEBEL AM HAFEN', desc: 'Kugel auf Schwarz: +1 Mult.' },
   { id: 'razzia', headline: 'POLIZEI KÜNDIGT RAZZIEN AN', desc: 'Die Geldeintreiber haben es eilig: Rate −20 %.' },
-  { id: 'inflation', headline: 'INFLATION STEIGT WEITER', desc: 'Alle Gewinne +20 %, die Rate auch.' },
+  { id: 'inflation', headline: 'INFLATION STEIGT WEITER', desc: 'Alle Auszahlungen ×1,2, die Rate auch.' },
   { id: 'lotto', headline: 'LOTTOFIEBER: 14 MILLIONEN IM JACKPOT', desc: 'Gewinnende Pleins: ×1,5 Mult.' },
   { id: 'vollmond', headline: 'VOLLMOND IN DER NACHT ZUM SAMSTAG', desc: 'Glück +2.' },
   { id: 'streik', headline: 'CROUPIERS DROHEN MIT STREIK', desc: 'Bestechung fliegt nie auf.' },
@@ -300,11 +300,15 @@ export const SHARK_FACTOR = 1.4;
 
 // ---- Bribing the croupier -----------------------------------------------------------------
 
-/** Price of a bribe as a share of the current rate, and the base risk of being seen. */
-export const BRIBE_PRICE = 0.25;
+/**
+ * The croupier asks for this share of what his nudge is worth for your bets (the gain in
+ * expected payout), so a bribe is only a small edge and costs more the more you have riding.
+ * Base risk of being seen, per bribe in the same rate.
+ */
+export const BRIBE_PRICE = 0.6;
 export const BRIBE_RISK = 0.15;
 /** Weight factor on pockets that pay for you. */
-export const BRIBE_PULL = 2.2;
+export const BRIBE_PULL = 2;
 
 // ---- Rival duels ---------------------------------------------------------------------------
 

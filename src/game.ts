@@ -488,7 +488,7 @@ export class Game {
     if (!this.hover) return;
     if (!this.run.placeBet(this.hover, this.chip)) {
       sfx.error();
-      if (this.run.activeRule === 'limit' && this.chip <= this.run.cash) toast('TISCHLIMIT: HÖCHSTENS EIN VIERTEL DEINES GELDES PRO RUNDE.');
+      if (this.run.activeRule === 'limit' && this.chip <= this.run.cash) toast('TISCHLIMIT: HÖCHSTENS EIN VIERTEL DEINES GELDES PRO DREH.');
       return;
     }
     this.world.placeChip(this.hover, this.chip);
@@ -511,12 +511,17 @@ export class Game {
   private bribe(): void {
     if (!this.run.bribe()) {
       sfx.error();
+      if (!this.run.stakeTotal) toast('ERST SETZEN – DER CROUPIER WILL WISSEN, WOFÜR.');
       return;
     }
-    sfx.coin();
-    this.world.croupierNod();
-    this.shownCash = this.run.cash;
-    toast('DER CROUPIER NICKT UNAUFFÄLLIG.');
+    if (this.run.bribed) {
+      sfx.coin();
+      this.world.croupierNod();
+      toast(`DER CROUPIER NICKT. ER KASSIERT ${fmt(this.run.bribePrice)}, WENN ER DIE KUGEL WIRFT.`);
+    } else {
+      sfx.pickup();
+      toast('BESTECHUNG ZURÜCKGEZOGEN.');
+    }
     this.renderTable();
   }
 
@@ -577,7 +582,9 @@ export class Game {
     renderSlip(this.run, false);
     const bribed = this.run.bribed;
     const r = this.run.spin();
-    if (this.run.bribeCaught) {
+    if (bribed && !this.run.bribePaid) {
+      toast('FÜR DIE BESTECHUNG FEHLT DIR DAS GELD. DER CROUPIER WIRFT GANZ NORMAL.');
+    } else if (this.run.bribeCaught) {
       sfx.error();
       toast('DER SAALCHEF HAT DIE BESTECHUNG GESEHEN! DAS GELD IST WEG, DIE RATE STEIGT UM 20 %.', 'boss');
     } else if (bribed) {

@@ -262,3 +262,6 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .luck-c { color: var(--luck); }
 .preview .desc { white-space: pre-line; }
 .info { white-space: pre-line; }
+#slip .ev.plus { color: var(--money); }
+#slip .ev.minus { color: #ff8a8a; }
+#osd .warn-soft { color: #ff8a8a; }
