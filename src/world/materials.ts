@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { assetUrl } from '../assets';
 
 /** Procedural textures for the casino: every surface gets colour, roughness and a normal map. */
 
@@ -270,13 +271,13 @@ export function wood(base: string, repeat: [number, number], rotate = false): Su
     return t;
   };
   return {
-    map: setup(loader.load(base + 'wood_diffuse.jpg'), true),
-    roughnessMap: setup(loader.load(base + 'wood_roughness.jpg'), false),
+    map: setup(loader.load(assetUrl(base, 'wood_diffuse.jpg', 'image/jpeg')), true),
+    roughnessMap: setup(loader.load(assetUrl(base, 'wood_roughness.jpg', 'image/jpeg')), false),
   };
 }
 
 export function woodBump(base: string, repeat: [number, number], rotate = false): THREE.Texture {
-  const t = loader.load(base + 'wood_bump.jpg');
+  const t = loader.load(assetUrl(base, 'wood_bump.jpg', 'image/jpeg'));
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(...repeat);
   if (rotate) t.rotation = Math.PI / 2;

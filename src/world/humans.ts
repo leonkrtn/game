@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { assetText } from '../assets';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
@@ -16,9 +17,7 @@ export async function loadModel(base: string, name: string): Promise<GLTF> {
     (parser as unknown as { textureLoader: THREE.TextureLoader }).textureLoader = new THREE.TextureLoader(parser.options.manager);
     return { name: 'img_textures' };
   });
-  const res = await fetch(base + name + '.glb.txt');
-  if (!res.ok) throw new Error(`${name}: HTTP ${res.status}`);
-  const bin = atob((await res.text()).trim());
+  const bin = atob((await assetText(base, name + '.glb.txt')).trim());
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return loader.parseAsync(bytes.buffer, base);
@@ -59,8 +58,7 @@ export interface HumanStyle {
 export async function loadHumanAssets(base: string): Promise<HumanAssets> {
   const load = (f: string) => loadModel(base, f);
   const clipsOf = async (kind: HumanKind) => {
-    const res = await fetch(`${base}clips-${kind}.json`);
-    const list = (await res.json()) as unknown[];
+    const list = JSON.parse(await assetText(base, `clips-${kind}.json`)) as unknown[];
     return Object.fromEntries(list.map((j) => {
       const c = THREE.AnimationClip.parse(j as never);
       return [c.name, c];

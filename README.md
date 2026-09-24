@@ -71,7 +71,8 @@ npm run dev          # http://localhost:5173
 npm test             # Unit-Tests der Spiellogik
 npm run sim          # Balancing-Simulation mit Bots
 npm run build        # Produktions-Build nach dist/
-npm run build:single # alles in einer einzigen dist-single/index.html
+npm run build:single # Seite + Assets für einen Webserver (dist-single/)
+npm run build:offline # eine einzige Datei zum Doppelklicken: dist-offline/Rien ne va plus.html
 ```
 
 ## Aufbau
