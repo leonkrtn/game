@@ -91,27 +91,43 @@ export class Game {
       if (loading) loading.textContent = `BANDFEHLER: ${(e as Error).message ?? e}`;
       throw e;
     }
+    this.world.setQuality(this.profile.quality === 'auto' ? 'high' : this.profile.quality);
+    if (loading) loading.textContent = 'LADE BAND … SPULE VOR';
+    await this.world.warmup().catch(() => undefined);
     loading?.remove();
     this.syncWorld();
     this.showStart();
+    this.last = performance.now();
     this.world.renderer.setAnimationLoop(() => this.frame());
-    this.watchPerformance();
   }
 
-  /** Drops the expensive effects when the machine can't keep up. */
-  private watchPerformance(): void {
-    let frames = 0;
-    const start = performance.now();
-    const check = () => {
-      frames++;
-      const elapsed = performance.now() - start;
-      if (elapsed < 3000) {
-        requestAnimationFrame(check);
-        return;
-      }
-      if (frames / (elapsed / 1000) < 35 && this.world.quality === 'high') this.world.setQuality('low');
-    };
-    requestAnimationFrame(check);
+  // Frame-rate watch for the 'auto' graphics setting: steps down while it stays too slow.
+  private fpsFrames = 0;
+  private fpsTime = 0;
+  private fpsSlow = 0;
+
+  private watchPerformance(dt: number): void {
+    if (this.profile.quality !== 'auto' || this.world.quality === 'low') return;
+    this.fpsFrames++;
+    this.fpsTime += dt;
+    if (this.fpsTime < 2) return;
+    const fps = this.fpsFrames / this.fpsTime;
+    this.fpsFrames = 0;
+    this.fpsTime = 0;
+    this.fpsSlow = fps < 45 ? this.fpsSlow + 1 : 0;
+    if (this.fpsSlow >= 2) {
+      this.fpsSlow = 0;
+      const next = this.world.quality === 'high' ? 'medium' : 'low';
+      this.world.setQuality(next);
+      toast(`GRAFIK AUTOMATISCH AUF ${next === 'medium' ? 'MITTEL' : 'NIEDRIG'} GESTELLT.`);
+    }
+  }
+
+  private setGraphics(q: Profile['quality']): void {
+    this.profile.quality = q;
+    saveProfile(this.profile);
+    this.world.setQuality(q === 'auto' ? 'high' : q);
+    this.fpsSlow = 0;
   }
 
   // ---- Runs ------------------------------------------------------------------
@@ -132,7 +148,8 @@ export class Game {
         sfx.muted = !sfx.muted;
         return !sfx.muted;
       },
-    }, !sfx.muted), 'clear');
+      graphics: (q) => this.setGraphics(q),
+    }, !sfx.muted, this.profile.quality), 'clear');
   }
 
   private newRun(kit: string, stage: number, ball = 'stahl'): void {
@@ -807,8 +824,10 @@ export class Game {
 
   private frame(): void {
     const now = performance.now();
-    const dt = Math.min(this.maxDt, (now - this.last) / 1000);
+    const raw = (now - this.last) / 1000;
+    const dt = Math.min(this.maxDt, raw);
     this.last = now;
+    this.watchPerformance(Math.min(raw, 1));
     const presses = this.input.takePresses();
 
     if (presses.includes('KeyM')) {

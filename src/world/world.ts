@@ -7,7 +7,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { BALLS, CHIP_COLORS, POCKET_MOD_INFO, type PocketToolId } from '../game/content';
+import { BALLS, CHIP_COLORS, ITEMS, POCKET_MOD_INFO, type PocketToolId } from '../game/content';
 import { FIELDS } from '../game/fields';
 import type { ItemInstance, Pocket, ShopItem } from '../game/types';
 import { Human, loadHumanAssets, loadModel, type HumanAssets, type HumanStyle } from './humans';
@@ -17,7 +17,7 @@ import {
   SMOKES, SMOKES_SPOT, TABLE, TABLE_LAYOUT, TABLE_SPOT, TABLE_WHEEL, VITRINE, VITRINE_SPOT,
 } from './layout';
 import { feltNormal, leather, smudges, wood } from './materials';
-import { buildCasino, smoke, type Casino } from './room';
+import { buildCasino, mergeStatic, smoke, type Casino } from './room';
 import { boardTexture, BOARD_SIZE, chipSideTexture, chipTexture } from './textures';
 import { faceEllipses, MAX_FACES, VhsShader } from './vhs';
 import { Wheel3D } from './wheel3d';
@@ -46,7 +46,7 @@ interface PlacedItem {
   gold: boolean;
 }
 
-export type Quality = 'high' | 'low';
+export type Quality = 'high' | 'medium' | 'low';
 
 export class World {
   readonly renderer: THREE.WebGLRenderer;
@@ -73,6 +73,8 @@ export class World {
   private composer: EffectComposer;
   private gtao?: GTAOPass;
   private vhs: ShaderPass;
+  private bloom!: UnrealBloomPass;
+  private frameNo = 0;
   private felt!: THREE.Mesh;
   private raycaster = new THREE.Raycaster();
   private chipGeo = new THREE.CylinderGeometry(CHIP_R, CHIP_R, CHIP_H, 40);
@@ -112,7 +114,7 @@ export class World {
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -125,11 +127,15 @@ export class World {
     const target = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
     this.composer = new EffectComposer(this.renderer, target);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.gtao = new GTAOPass(this.scene, this.camera, size.x, size.y);
+    this.gtao = new GTAOPass(this.scene, this.camera, size.x / 2, size.y / 2);
+    // Ambient occlusion at half resolution: it is soft anyway and costs a quarter.
+    const gtaoSetSize = this.gtao.setSize.bind(this.gtao);
+    this.gtao.setSize = (w: number, h: number) => gtaoSetSize(Math.max(1, Math.floor(w / 2)), Math.max(1, Math.floor(h / 2)));
     this.gtao.updateGtaoMaterial({ radius: 0.35, distanceExponent: 1.6, thickness: 1.2, scale: 1.2, samples: 12 });
     this.gtao.blendIntensity = 0.85;
     this.composer.addPass(this.gtao);
-    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.5, 0.97));
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(size.x / 2, size.y / 2), 0.32, 0.5, 0.97);
+    this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
     this.vhs = new ShaderPass(VhsShader);
     this.composer.addPass(this.vhs);
@@ -165,7 +171,11 @@ export class World {
     const chair = await opt('chair');
     const candle = await opt('candle');
     onProgress?.('LADE BAND … CASINO');
+    const before = new Set(this.scene.children);
     this.casino = buildCasino(this.scene, base, chair, candle);
+    // Fewer draw calls: glue the room's fixed furniture together, keeping everything that moves.
+    const roomRoots = this.scene.children.filter((o) => !before.has(o));
+    mergeStatic(roomRoots, [this.casino.showcase, this.casino.phoneHandset, ...this.casino.occluders]);
     this.buildTable(base);
     this.buildMarquee();
     this.buildPeople();
@@ -191,11 +201,66 @@ export class World {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * high: everything. medium: no ambient occlusion, 1× resolution, lighter shadows.
+   * low: also no bloom and no multisampling, lower resolution, shadows updated less often.
+   */
   setQuality(q: Quality): void {
     this.quality = q;
     if (this.gtao) this.gtao.enabled = q === 'high';
-    this.renderer.setPixelRatio(q === 'high' ? Math.min(window.devicePixelRatio, 1.5) : 0.85);
+    this.bloom.enabled = q !== 'low';
+    const samples = q === 'high' ? 4 : q === 'medium' ? 2 : 0;
+    for (const t of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      if (t.samples !== samples) {
+        t.samples = samples;
+        t.dispose();
+      }
+    }
+    const shadow = q === 'high' ? 2048 : 1024;
+    this.scene.traverse((o) => {
+      const l = o as THREE.SpotLight;
+      if (l.isSpotLight && l.castShadow && l.shadow.mapSize.x !== shadow && l.shadow.mapSize.x >= 1024) {
+        l.shadow.mapSize.set(shadow, shadow);
+        l.shadow.map?.dispose();
+        (l.shadow as { map: THREE.WebGLRenderTarget | null }).map = null;
+      }
+    });
+    this.renderer.setPixelRatio(q === 'high' ? Math.min(window.devicePixelRatio, 1.25) : q === 'medium' ? 1 : 0.75);
     this.resize();
+  }
+
+  /**
+   * Compiles every shader the game will need while the loading screen is up, so nothing stutters
+   * the first time a chip, a talisman or a visitor appears.
+   */
+  async warmup(): Promise<void> {
+    const extra = new THREE.Group();
+    extra.position.set(TABLE.x, TABLE.height + 0.02, TABLE.z);
+    for (const v of [1, 5, 25, 100, 500, 1000, 5000, 25000, 100000]) extra.add(this.makeChip(v));
+    for (const id of Object.keys(ITEMS)) {
+      const f = buildFigurine(id);
+      extra.add(f.group);
+      const g = buildFigurine(id);
+      goldify(g);
+      extra.add(g.group);
+    }
+    extra.add(buildUpgradeBox('#f2c14e').group);
+    this.scene.add(extra);
+    // Hidden things (visitors, the ball, ghost chips) are skipped by the compiler, so show them for a moment.
+    const hidden: THREE.Object3D[] = [];
+    this.scene.traverse((o) => {
+      if (!o.visible) {
+        hidden.push(o);
+        o.visible = true;
+      }
+    });
+    try {
+      await this.renderer.compileAsync(this.scene, this.camera);
+      this.composer.render(0);
+    } finally {
+      for (const o of hidden) o.visible = false;
+      this.scene.remove(extra);
+    }
   }
 
   /** Short burst of tape distortion, e.g. when the debt collectors come in. */
@@ -1064,6 +1129,8 @@ export class World {
         mat.color.setHex(0xb48cff);
       }
       mat.opacity += (target - mat.opacity) * Math.min(1, dt * 14);
+      // Invisible highlights still cost a draw call each; skip them.
+      m.visible = mat.opacity > 0.004;
     }
 
     // People: the croupier watches the wheel, everyone else idles and looks around.
@@ -1086,6 +1153,11 @@ export class World {
     const wantAmount = this.cameraMode === 'table' || this.cameraMode === 'wheel' ? 0.55 : 1;
     this.vhs.uniforms.amount.value += (wantAmount - this.vhs.uniforms.amount.value) * Math.min(1, dt * 3);
     this.vhs.uniforms.glitch.value = Math.min(1, this.glitch);
+    // Shadows follow people and chips; on weaker settings they may lag a frame or three behind.
+    this.frameNo++;
+    const every = this.quality === 'low' ? 3 : this.quality === 'medium' ? 2 : 1;
+    this.renderer.shadowMap.autoUpdate = false;
+    this.renderer.shadowMap.needsUpdate = this.frameNo % every === 0;
     this.composer.render(dt);
   }
 

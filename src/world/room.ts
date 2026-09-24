@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { DOOR, KASSE, PHONE, ROOM, SMOKES, TABLE, VITRINE } from './layout';
 import { carpet, ceiling, damask, marble, smudges, wood, woodBump } from './materials';
 
@@ -181,10 +182,10 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   lamp(KASSE.x, KASSE.z + 0.8, 16);
   lamp(-4.6, 3.2, 12);
   lamp(3.8, 2.6, 12);
-  lamp(VITRINE.x + 1.2, VITRINE.z, 10);
-  lamp(DOOR.x, ROOM.z0 + 1.2, 9, 0xffb070);
+  lamp(VITRINE.x + 0.9, VITRINE.z, 13);
+  lamp(DOOR.x + 0.8, ROOM.z0 + 1.8, 11, 0xffb070);
   lamp(TABLE.x, TABLE.z + 1.9, 12, 0xffd0a0);
-  lamp(-2.8, 0.6, 8);
+
 
   // Neon signs with coloured bounce light.
   const sign = neon('Rien ne va plus', '#ff2fa8', 3.4, 0.8, 'italic 700 150px Georgia, serif');
@@ -252,12 +253,11 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     g.add(front);
     for (const z of [-V.halfD, V.halfD]) g.add(mesh(new THREE.BoxGeometry(V.halfW * 2, V.height - 0.7, 0.03), brass, 0, 0.7 + (V.height - 0.7) / 2, z));
     for (const y of [0.72, 1.3]) g.add(mesh(new THREE.BoxGeometry(V.halfW * 2 - 0.06, 0.015, V.halfD * 2 - 0.06), phys({ color: 0xffffff, transparent: true, opacity: 0.25, roughness: 0.02 }), 0, y, 0, false));
-    const inLight = new THREE.PointLight(0xffe0b0, 2.2, 2.4, 2);
-    inLight.position.set(0.1, V.height - 0.12, 0);
+
     const sign = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 0.3), new THREE.MeshBasicMaterial({ map: textTexture('Kuriositäten', 512, 120, 'italic 700 78px Georgia, serif', '#ffffff', '#ff9a2a'), transparent: true, toneMapped: false }));
     sign.rotation.y = Math.PI / 2;
     sign.position.set(V.halfW + 0.02, V.height + 0.28, 0);
-    g.add(inLight, sign, showcase);
+    g.add(sign, showcase);
     scene.add(g);
   }
 
@@ -365,9 +365,6 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     const lever = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.45), chrome, 0.46, 1.4, 0.05);
     lever.rotation.z = -0.15;
     g.add(lever, mesh(new THREE.SphereGeometry(0.045, 14, 10), phys({ color: 0xc8102c, clearcoat: 1, roughness: 0.2 }), 0.49, 1.63, 0.05));
-    const glowLight = new THREE.PointLight([0xff2a4a, 0x27e3ff, 0xffb000][i], 1.6, 2.2, 2);
-    glowLight.position.set(0, 1.7, 0.6);
-    g.add(glowLight);
     scene.add(g);
     if (i !== 1) guestSpots.push({ x, z: ROOM.z0 + 1.25, heading: Math.PI });
   }
@@ -468,9 +465,6 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
       g.add(tube);
     });
     g.add(mesh(new THREE.PlaneGeometry(0.6, 0.35), new THREE.MeshBasicMaterial({ map: textTexture('♪  A1  B4  C7  ♪', 512, 256, '700 60px monospace', '#fff3c0', '#ff9a2a', '#1a0a04'), toneMapped: false }), 0, 0.85, 0.305, false));
-    const jl = new THREE.PointLight(0xff8a3a, 2, 2.5, 2);
-    jl.position.set(0, 1.2, 0.8);
-    g.add(jl);
     scene.add(g);
   }
   {
@@ -604,15 +598,11 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     g.add(mesh(new THREE.BoxGeometry(0.06, 0.1, 0.02), std({ color: 0x111111, roughness: 0.4 }), 0.22, 0.62, S.halfW + 0.058));
     const sign = mesh(new THREE.PlaneGeometry(0.66, 0.16), new THREE.MeshBasicMaterial({ map: textTexture('ZIGARETTEN', 512, 128, '700 80px Arial Narrow, Arial, sans-serif', '#fff4d8', '#ff5a2a', '#5a0608'), toneMapped: false }), 0, 1.72, S.halfW + 0.052, false);
     g.add(sign);
-    const glow = new THREE.PointLight(0xffb070, 0.8, 2.4, 2);
-    glow.position.set(0, 1.1, 1.0);
-    g.add(glow);
     let hum = 0;
     updates.push((dt) => {
       hum -= dt;
       if (hum < -0.15) hum = 3 + Math.random() * 7;
       const on = hum > 0 || Math.random() > 0.5;
-      glow.intensity = on ? 0.8 : 0.2;
       (front.material as THREE.MeshStandardMaterial).emissiveIntensity = on ? 0.28 : 0.08;
     });
     scene.add(g);
@@ -832,4 +822,45 @@ function dust(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[], 
     }
     geo.attributes.position.needsUpdate = true;
   });
+}
+
+/**
+ * Merges the room's static meshes that share a material into one mesh each, so the GPU gets a
+ * few dozen draw calls instead of hundreds. Anything under `keep` (moving or animated parts) stays.
+ */
+export function mergeStatic(roots: THREE.Object3D[], keep: THREE.Object3D[]): number {
+  const skip = new Set<THREE.Object3D>();
+  for (const k of keep) k.traverse((o) => skip.add(o));
+  const groups = new Map<string, { mat: THREE.Material; cast: boolean; receive: boolean; items: THREE.Mesh[] }>();
+  for (const root of roots) {
+    root.updateMatrixWorld(true);
+    root.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh || skip.has(m) || (m as unknown as THREE.InstancedMesh).isInstancedMesh || Array.isArray(m.material) || !m.visible) return;
+      const g = m.geometry;
+      const attrs = Object.keys(g.attributes).sort().join(',');
+      const key = `${m.material.uuid}|${m.castShadow}|${m.receiveShadow}|${g.index ? 'i' : 'n'}|${attrs}|${m.renderOrder}`;
+      let e = groups.get(key);
+      if (!e) groups.set(key, (e = { mat: m.material, cast: m.castShadow, receive: m.receiveShadow, items: [] }));
+      e.items.push(m);
+    });
+  }
+  let removed = 0;
+  const scene = roots[0]?.parent;
+  if (!scene) return 0;
+  for (const e of groups.values()) {
+    if (e.items.length < 2) continue;
+    const geos = e.items.map((m) => m.geometry.clone().applyMatrix4(m.matrixWorld));
+    const merged = mergeGeometries(geos, false);
+    geos.forEach((g) => g.dispose());
+    if (!merged) continue;
+    const mesh = new THREE.Mesh(merged, e.mat);
+    mesh.castShadow = e.cast;
+    mesh.receiveShadow = e.receive;
+    mesh.matrixAutoUpdate = false;
+    scene.add(mesh);
+    for (const m of e.items) m.parent?.remove(m);
+    removed += e.items.length - 1;
+  }
+  return removed;
 }

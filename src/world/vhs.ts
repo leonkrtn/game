@@ -62,7 +62,9 @@ export const VhsShader = {
       return vec3(c.x + 0.956 * c.y + 0.621 * c.z, c.x - 0.272 * c.y - 0.647 * c.z, c.x - 1.106 * c.y + 1.703 * c.z);
     }
 
-    vec3 tap(vec2 uv) { return texture2D(tDiffuse, censor(uv)).rgb; }
+    // The face mosaic is looked up once per pixel; every other tap reuses its offset.
+    vec2 shift = vec2(0.0);
+    vec3 tap(vec2 uv) { return texture2D(tDiffuse, uv + shift).rgb; }
 
     void main() {
       float a = amount;
@@ -82,6 +84,7 @@ export const VhsShader = {
       uv.x += jitter + band * (hash(vec2(frame, line)) - 0.5) * 0.006 * a + headSwitch * 0.015 * (hash(vec2(line, frame * 1.3)) - 0.2);
       uv.x += g * (hash(vec2(floor(uv.y * 24.0), frame)) - 0.5) * 0.06;
 
+      shift = censor(uv) - uv;
       // Low chroma resolution: luma is sharp, colour smears sideways.
       vec2 px = vec2(1.0 / resolution.x, 0.0);
       vec3 center = rgb2yiq(tap(uv));

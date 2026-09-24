@@ -203,9 +203,13 @@ export interface StartHandlers {
   collection(): void;
   controls(): void;
   toggleSound(): boolean;
+  graphics(q: Profile['quality']): void;
 }
 
-export function startView(profile: Profile, locked: Set<string>, hd: StartHandlers, soundOn: boolean): HTMLElement {
+const GRAPHICS: Profile['quality'][] = ['auto', 'high', 'medium', 'low'];
+const GRAPHICS_NAME: Record<Profile['quality'], string> = { auto: 'AUTOMATISCH', high: 'HOCH', medium: 'MITTEL', low: 'NIEDRIG' };
+
+export function startView(profile: Profile, locked: Set<string>, hd: StartHandlers, soundOn: boolean, quality: Profile['quality'] = 'auto'): HTMLElement {
   const kits = Object.values(START_KITS);
   let kit = locked.has(profile.lastKit) ? 'klassisch' : profile.lastKit;
   const balls = Object.values(BALLS).filter((b) => !locked.has(b.id));
@@ -243,6 +247,17 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
   renderValues();
   info.textContent = 'Du hast dir Geld bei den falschen Leuten geliehen. Nach je drei Drehs kommen sie an die Kasse. Setz dein echtes Geld, sammel Talismane – und bezahl.';
   const lockedKits = kits.filter((k) => locked.has(k.id)).length;
+  let gfx = quality;
+  const gfxValue = h('span', { class: 'v', text: `◀ ${GRAPHICS_NAME[gfx]} ▶` });
+  const stepGfx = (d: number) => {
+    gfx = GRAPHICS[(GRAPHICS.indexOf(gfx) + d + GRAPHICS.length) % GRAPHICS.length];
+    gfxValue.textContent = `◀ ${GRAPHICS_NAME[gfx]} ▶`;
+    hd.graphics(gfx);
+  };
+  const graphics = row('GRAFIK', gfxValue, () => stepGfx(1), {
+    onStep: stepGfx,
+    onHover: () => (info.textContent = 'Ruckelt es? Stell die Grafik niedriger. Automatisch senkt sie von selbst, wenn das Bild zu langsam wird.'),
+  });
   const sound = row('TON', soundOn ? 'AN' : 'AUS', () => {
     const on = hd.toggleSound();
     (sound.lastElementChild as HTMLElement).textContent = on ? 'AN' : 'AUS';
@@ -260,6 +275,7 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
       row('KUGEL', ballValue, () => stepBall(1), { onStep: stepBall, onHover: () => (info.textContent = `${BALLS[ball].name}: ${BALLS[ball].desc}` + (lockedBalls ? ` · ${lockedBalls} weitere Kugeln über Erfolge freischalten` : '')) }),
       row('SAMMLUNG', `${profile.done.length}/${ACHIEVEMENTS.length}`, hd.collection),
       row('STEUERUNG', '', hd.controls),
+      graphics,
       sound,
     ),
     info,
