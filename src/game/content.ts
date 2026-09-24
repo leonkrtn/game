@@ -44,7 +44,7 @@ export const ITEMS: Record<string, ItemDef> = Object.fromEntries([
   I('zigarre', 'Zigarre', 'rare', 'Setzt du mindestens die Hälfte deines Bargelds: ×1,5 Mult.'),
   I('fernglas', 'Opernglas', 'rare', 'Gewinnt ein Cheval, Carré, eine Transversale oder Sechserreihe: +2 Mult.'),
   I('spiegel', 'Handspiegel', 'rare', 'Kopiert die Wirkung des Talismans rechts daneben.'),
-  I('walkman', 'Walkman', 'common', 'Liegt dein ganzer Einsatz auf einem einzigen Feld: +1 Mult.'),
+  I('walkman', 'Walkman', 'common', 'Setzt du nur auf Pleins (Einzelzahlen): +2 Mult.'),
   I('pager', 'Pager', 'common', 'Knapp daneben zählt: Pleins direkt neben der Kugel zahlen ×8.'),
   I('zippo', 'Zippo', 'common', 'Nach zwei verlorenen Runden in Folge: ×2 Mult.'),
   I('hasenpfote', 'Hasenpfote', 'common', 'Glück +1 für jeden freien Platz auf deinem Tisch.'),
@@ -202,7 +202,7 @@ export const GOLD_DESC: Record<string, string> = {
   winkekatze: 'Gewinnt ein Plein: ×3 Mult.', magnet: 'Fächer mit deinen Plein-Zahlen: Gewicht ×3.', taschenuhr: '+2 Drehs vor jeder Rate.',
   goldbarren: 'Kugel in einem Goldfach: ×3 Mult.', police: 'Ohne Gewinn: 60 % der Einsätze zurück.', zigarre: 'Mindestens halbes Bargeld gesetzt: ×2 Mult.',
   fernglas: 'Innenwette gewinnt (außer Plein): +4 Mult.', spiegel: 'Kopiert den rechten Nachbarn – golden, als wäre er golden.',
-  walkman: 'Ganzer Einsatz auf einem Feld: +2 Mult.', pager: 'Pleins direkt neben der Kugel zahlen ×16.', zippo: 'Nach zwei Pleiten in Folge: ×3 Mult.',
+  walkman: 'Nur Pleins gesetzt: +4 Mult.', pager: 'Pleins direkt neben der Kugel zahlen ×16.', zippo: 'Nach zwei Pleiten in Folge: ×3 Mult.',
   hasenpfote: 'Glück +2 für jeden freien Platz.', kassette: 'Gleicher Einsatz wie davor: +2 Mult.', zauberwuerfel: 'Verdrehtes Feld gewinnt: ×5 Mult.',
   polaroid: 'Dieselbe Zahl wie davor: ×9 Mult.', voodoo: 'Jede Rate 25 % niedriger. Jeder dritte Nachhopser springt gegen dich.',
   goldkette: '+0,2 Mult pro $50 Bargeld (höchstens +6).',
@@ -220,7 +220,7 @@ export interface SetDef {
 }
 
 export const SETS: SetDef[] = [
-  { id: 'achtziger', name: 'Mixtape 87', items: ['walkman', 'kassette', 'pager'], desc: '+2 Mult auf jeden Gewinn.' },
+  { id: 'achtziger', name: 'Mixtape 87', items: ['walkman', 'kassette', 'pager'], desc: 'Gewinnende Pleins, auch Pager-Treffer: ×3 Mult.' },
   { id: 'aberglaube', name: 'Aberglaube', items: ['hufeisen', 'kleeblatt', 'hasenpfote'], desc: 'Glück +3.' },
   { id: 'nacht', name: 'Schwarze Nacht', items: ['rabe', 'katze', 'totenkopf'], desc: 'Kugel auf Schwarz oder 0: ×2 Mult.' },
   { id: 'bank', name: 'Schweizer Konto', items: ['sparschwein', 'abakus', 'goldbarren'], desc: 'Zinsen +6 % und jede Rate 10 % niedriger.' },

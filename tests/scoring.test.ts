@@ -54,13 +54,16 @@ describe('scoreSpin', () => {
     expect(scoreSpin(inp, idx(inp.wheel, 2)).payout).toBe(30);
   });
 
-  it('the pager pays near misses and the walkman rewards focus', () => {
+  it('the pager pays near misses and the walkman rewards pleins', () => {
     const w = wheel();
     // 32 sits next to 0 on the wheel.
     const inp = input({ wheel: w, bets: { n32: [10] }, items: [item(1, 'pager'), item(2, 'walkman')] });
     const r = scoreSpin(inp, idx(w, 0));
     expect(r.sum).toBe(80);
-    expect(r.mult).toBe(2);
+    // Only pleins on the table: the walkman adds +2.
+    expect(r.mult).toBe(3);
+    const mixed = input({ wheel: w, bets: { n32: [10], red: [10] }, items: [item(1, 'pager'), item(2, 'walkman')] });
+    expect(scoreSpin(mixed, idx(w, 0)).mult).toBe(1);
   });
 
   it('the polaroid and the magic cube multiply', () => {

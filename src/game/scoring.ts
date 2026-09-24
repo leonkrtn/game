@@ -221,7 +221,6 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   if (input.ball === 'onyx' && pocket.color === 'black') add('Onyx', 1.5);
   if (input.ball === 'onyx' && pocket.color === 'red') add('Onyx', -0.5);
   if (input.boost?.korn) add('Doppelkorn', 2);
-  if (sets.some((z) => z.id === 'achtziger')) add('Set Mixtape 87', 2);
 
   const kinds = new Set(winners.map((w) => FIELD_BY_ID[w.fieldId].kind));
   const straightWin = winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight' && w.payout >= 18);
@@ -250,7 +249,7 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
         if (results.length >= 4) add(name, g, src.uid);
         break;
       case 'walkman':
-        if (results.length === 1) add(name, g, src.uid);
+        if (results.length && results.every((r) => FIELD_BY_ID[r.fieldId].kind === 'straight')) add(name, 2 * g, src.uid);
         break;
       case 'kassette':
         if (input.sameBets) add(name, g, src.uid);
@@ -292,6 +291,8 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   }
   if (sets.some((z) => z.id === 'nacht') && (pocket.color === 'black' || pocket.number === 0)) mul('Set Schwarze Nacht', 2);
   if (sets.some((z) => z.id === 'feuer') && pocket.color === 'red') mul('Set Feuerteufel', 2);
+  // The mixtape set also turns the pager's near misses into full plein wins for its ×3.
+  if (sets.some((z) => z.id === 'achtziger') && winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight')) mul('Set Mixtape 87', 3);
   if (input.news === 'lotto' && straightWin) mul('Lottofieber', 1.5);
   if (input.news === 'komet' && pocket.number === 0) mul('Komet', 3);
   if (input.news === 'inflation') mul('Inflation', 1.2);
