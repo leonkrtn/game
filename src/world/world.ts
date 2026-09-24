@@ -214,8 +214,7 @@ export class World {
 
   private buildPeople(): void {
     this.player = this.human({ kind: 'man', hat: true });
-    this.player.group.position.set(DOOR.x + 0.6, 0, DOOR.z + 1.6);
-    this.player.heading = Math.PI * 0.85;
+    this.resetPlayer();
     this.croupier = this.human({ kind: 'man', top: 0x3a0a12, bottom: 0x121212, beard: false });
     this.croupier.group.position.set(TABLE.x - 0.1, 0, TABLE.z - TABLE.halfD - 0.42);
     this.cashier = this.human({ kind: 'man', top: 0x1c3326, bottom: 0x151515 });
@@ -449,6 +448,14 @@ export class World {
 
   nearPhone(): boolean {
     return this.distTo(PHONE_SPOT) < 1.1;
+  }
+
+  /** Puts the player a few steps into the room, looking at the table. */
+  resetPlayer(): void {
+    this.player.group.position.set(TABLE.x - 0.4, 0, TABLE.z + 2.6);
+    this.player.heading = Math.PI;
+    this.player.group.visible = true;
+    this.velocity.set(0, 0, 0);
   }
 
   nearSmokes(): boolean {

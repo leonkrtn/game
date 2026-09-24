@@ -144,6 +144,7 @@ export class Game {
     this.run = new Run({ kit, stage, ball, locked: lockedIds(this.profile) });
     this.world.setBall(ball);
     this.world.dismissShark();
+    this.world.resetPlayer();
     this.shownCash = this.run.cash;
     this.shownCashValue = this.run.cash;
     this.score = undefined;
