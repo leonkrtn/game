@@ -109,6 +109,10 @@ class Sfx {
     this.tone(110, 1.2, 'sawtooth', 0.15, 0, -60);
     this.noise(0.3, 0.6, 400, 0.2);
   }
+  /** A footstep on carpet: a soft, low thud. */
+  step(): void {
+    this.noise(0.07, 0.05, 260 + Math.random() * 80);
+  }
   /** Tape rewinding: a rising whine over hiss. */
   rewind(): void {
     this.tone(300, 0.6, 'sawtooth', 0.04, 0, 1800);

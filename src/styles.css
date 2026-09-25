@@ -265,3 +265,14 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 #slip .ev.plus { color: var(--money); }
 #slip .ev.minus { color: #ff8a8a; }
 #osd .warn-soft { color: #ff8a8a; }
+
+/* First-person crosshair: a small dot that grows when you look at something usable. */
+#crosshair { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(244, 244, 236, 0.75); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6); transition: transform 0.12s, background 0.12s; }
+#crosshair.on { transform: scale(2.2); background: var(--osd); }
+#prompt { bottom: auto; top: calc(50% + 30px); }
+#slip .limit { display: flex; justify-content: space-between; color: var(--debt); }
+#slip .meter { height: 6px; background: rgba(255, 255, 255, 0.15); margin-bottom: 4px; }
+#slip .meter i { display: block; height: 100%; background: var(--debt); }
+/* First-run hints: a caption strip like a subtitle on the tape. */
+#hint { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: min(620px, calc(100% - 700px)); min-width: 300px; text-align: center; font-size: 26px; background: rgba(0, 0, 0, 0.7); padding: 4px 14px; border-left: 4px solid var(--luck); text-transform: uppercase; }
+#hint kbd { font-size: 22px; }

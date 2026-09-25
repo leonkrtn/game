@@ -44,7 +44,7 @@ export function kasseView(run: Run, hd: KasseHandlers): HTMLElement {
         h('div', { class: 'stat' }, h('span', { text: 'FÄLLIG' }), h('span', { class: 'debt-c', text: fmt(run.debt) })),
         run.debt !== run.baseDebt ? h('div', { class: 'info', text: rateReasons(run) }) : null,
         h('div', { class: 'stat' }, h('span', { text: 'EINGEZAHLT' }), h('span', { text: fmt(run.deposit) })),
-        h('div', { class: 'stat' }, h('span', { text: due ? 'STATUS' : 'NOCH' }), h('span', { class: due ? 'rec-c' : '', text: due ? 'JETZT FÄLLIG' : `${run.roundsLeft} RUNDE${run.roundsLeft === 1 ? '' : 'N'}` })),
+        h('div', { class: 'stat' }, h('span', { text: due ? 'STATUS' : 'NOCH' }), h('span', { class: due ? 'rec-c' : '', text: due ? 'JETZT FÄLLIG' : `${run.roundsLeft} DREH${run.roundsLeft === 1 ? '' : 'S'}` })),
         label('AKTIONEN'),
         row('RATE BEZAHLEN', `+◆${run.payMarks}`, hd.pay, { disabled: !run.canPay() }),
         payNote ? h('div', { class: 'info', text: payNote }) : null,

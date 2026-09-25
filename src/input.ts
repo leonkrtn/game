@@ -28,8 +28,9 @@ export class Input {
   /** Movement from WASD / arrows as screen-relative x (right) and y (towards the viewer). */
   axis(): { x: number; y: number } {
     let x = 0, y = 0;
-    if (this.isDown('KeyA') || this.isDown('ArrowLeft')) x -= 1;
-    if (this.isDown('KeyD') || this.isDown('ArrowRight')) x += 1;
+    // Arrow left/right turn the view in first person; A/D step sideways.
+    if (this.isDown('KeyA')) x -= 1;
+    if (this.isDown('KeyD')) x += 1;
     if (this.isDown('KeyW') || this.isDown('ArrowUp')) y -= 1;
     if (this.isDown('KeyS') || this.isDown('ArrowDown')) y += 1;
     const l = Math.hypot(x, y);

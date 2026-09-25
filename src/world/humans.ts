@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { assetText } from '../assets';
+import { findPath } from './nav';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 
@@ -237,12 +238,37 @@ export class Human {
   }
 
   /** Walks towards a point; returns true once arrived. */
-  walkTo(x: number, z: number, dt: number, speed = 1.4): boolean {
+  private path: { x: number; z: number }[] = [];
+  private pathGoal = { x: NaN, z: NaN };
+
+  /**
+   * Walks around furniture to (x, z) along a path from the navigation grid. The path is planned
+   * again when the goal moves. Returns true once there.
+   */
+  walkPath(x: number, z: number, dt: number, speed = 1.4): boolean {
+    const p = this.group.position;
+    if (Math.hypot(x - this.pathGoal.x, z - this.pathGoal.z) > 0.3 || !this.path.length) {
+      if (Math.hypot(x - p.x, z - p.z) < 0.06) return this.walkTo(x, z, dt, speed);
+      this.pathGoal = { x, z };
+      this.path = findPath(p.x, p.z, x, z);
+    }
+    const next = this.path[0];
+    if (!next) return this.walkTo(x, z, dt, speed);
+    const last = this.path.length === 1;
+    const there = this.walkTo(next.x, next.z, dt, speed, !last);
+    if (there && !last) {
+      this.path.shift();
+      return false;
+    }
+    return there && last;
+  }
+
+  walkTo(x: number, z: number, dt: number, speed = 1.4, passing = false): boolean {
     const p = this.group.position;
     const dx = x - p.x, dz = z - p.z;
     const d = Math.hypot(dx, dz);
-    if (d < 0.05) {
-      this.setSpeed(0);
+    if (d < (passing ? 0.12 : 0.05)) {
+      if (!passing) this.setSpeed(0);
       return true;
     }
     const step = Math.min(d, speed * dt);

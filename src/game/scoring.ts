@@ -1,4 +1,4 @@
-import { ITEMS, POCKET_MOD_INFO, SETS, type RuleId, type SetDef } from './content';
+import { cursed, ITEMS, POCKET_MOD_INFO, SETS, type RuleId, type SetDef } from './content';
 import { FIELD_BY_ID, fieldWins, isInsideCombo, isOutside } from './fields';
 import type { Bets, ItemInstance, Pocket } from './types';
 import { POCKET_COUNT } from './wheel';
@@ -11,6 +11,8 @@ export interface Perks {
   blackMult: number;
   extraRounds: number;
   slots: number;
+  /** Phone deals that raised the table limit. */
+  vip?: number;
 }
 
 export interface SpinInput {
@@ -160,7 +162,7 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     if (!stake) continue;
     let won = fieldWins(f, pocket);
     let payout = f.payout;
-    if (f.kind === 'red' && rule === 'rotfluch') won = false;
+    if (cursed(f.kind, rule)) won = false;
     if (f.kind === 'straight' && rule === 'halbzahl') payout = 18;
     results.push({ fieldId: fid, stake, won, payout: won ? payout : 0, amount: won ? stake * payout : 0 });
   }
@@ -263,7 +265,7 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
         break;
       case 'rabe':
         if (!anyWin && stake > 0) growth[inst.uid] = 1;
-        add(name, 0.5 * g * inst.counter, src.uid);
+        add(name, Math.min(3 * g, 0.4 * g * inst.counter), src.uid);
         break;
     }
   }
@@ -289,10 +291,10 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     if (inst.def === 'polaroid' && input.lastNumber === pocket.number) mul(name, up(5), src.uid);
     if (inst.def === 'zauberwuerfel' && input.cubeField && winners.some((w) => w.fieldId === input.cubeField)) mul(name, up(3), src.uid);
   }
-  if (sets.some((z) => z.id === 'nacht') && (pocket.color === 'black' || pocket.number === 0)) mul('Set Schwarze Nacht', 2);
+  if (sets.some((z) => z.id === 'nacht') && (pocket.color === 'black' || pocket.number === 0)) mul('Set Schwarze Nacht', 1.75);
   if (sets.some((z) => z.id === 'feuer') && pocket.color === 'red') mul('Set Feuerteufel', 2);
   // The mixtape set also turns the pager's near misses into full plein wins for its ×3.
-  if (sets.some((z) => z.id === 'achtziger') && winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight')) mul('Set Mixtape 87', 3);
+  if (sets.some((z) => z.id === 'achtziger') && winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight')) mul('Set Mixtape 87', 4);
   if (input.news === 'lotto' && straightWin) mul('Lottofieber', 1.5);
   if (input.news === 'komet' && pocket.number === 0) mul('Komet', 3);
   if (input.news === 'inflation') mul('Inflation', 1.2);

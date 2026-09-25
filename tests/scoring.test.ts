@@ -230,6 +230,7 @@ describe('Run', () => {
   it('luck lets the ball hop into a paying neighbour', () => {
     const run = new Run({ seed: 9 });
     run.perks.luck = 100;
+    run.perks.vip = 100;
     run.cash = 1000;
     run.placeBet('n17', 10);
     let hop: { from: number; to: number } | undefined;
@@ -295,6 +296,7 @@ describe('fair play', () => {
   it('refunds never exceed 90 % of a lost stake', () => {
     const run = new Run({ seed: 30 });
     run.cash = 1000;
+    run.perks.vip = 100;
     run.items = [{ uid: 1, def: 'police', counter: 0, gold: true }, { uid: 2, def: 'spiegel', counter: 0 }, { uid: 3, def: 'police', counter: 0 }];
     run.boost.kaugummi = true;
     run.placeBet('n17', 100);
@@ -331,5 +333,32 @@ describe('fair play', () => {
     const one = run.interestRate;
     run.items.unshift({ uid: 2, def: 'spiegel', counter: 0 });
     expect(run.interestRate).toBeCloseTo(one + 0.04, 9);
+  });
+});
+
+describe('table limits', () => {
+  it('caps the stake per spin and per plein', () => {
+    const run = new Run({ seed: 40 });
+    run.rule = undefined;
+    run.cash = 10000;
+    expect(run.tableMax).toBe(25);
+    expect(run.fieldMax('n17')).toBe(6);
+    expect(run.fieldMax('co0-0')).toBe(24);
+    expect(run.placeBet('red', 25)).toBe(true);
+    expect(run.placeBet('black', 1)).toBe(false);
+    run.clearBets();
+    expect(run.placeBet('n17', 6)).toBe(true);
+    expect(run.placeBet('n17', 1)).toBe(false);
+  });
+
+  it('the club card, the phone and the strict floor manager change the limit', () => {
+    const run = new Run({ seed: 41 });
+    run.rule = undefined;
+    run.items.push({ uid: 99, def: 'clubkarte', counter: 0 });
+    expect(run.tableMax).toBe(50);
+    run.perks.vip = 1;
+    expect(run.tableMax).toBe(75);
+    run.rule = 'limit';
+    expect(run.tableMax).toBe(38);
   });
 });

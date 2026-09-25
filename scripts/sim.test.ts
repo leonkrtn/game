@@ -36,7 +36,7 @@ function round(run: Run, bot: Bot): void {
   if (bot.save) run.depositCash(Math.floor(run.cash * bot.save));
   const free = Math.max(0, run.cash - Math.max(0, run.debt - run.deposit) * 0.5);
   const stake = Math.floor(free * bot.f);
-  if (stake > 0) run.placeBet('red', stake);
+  if (stake > 0) run.placeBet('red', Math.min(stake, run.fieldRoom('red')));
   if (bot.risk && run.roundsLeft === 1) run.setHighRisk(true);
   run.spin();
   run.settle();

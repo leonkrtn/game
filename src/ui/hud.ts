@@ -1,4 +1,4 @@
-import { CHIP_COLORS, chipLabel, CONSUMABLES, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_MOD_INFO, RARITY, RULES, SETS, STAGES } from '../game/content';
+import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_MOD_INFO, RARITY, RULES, SETS, STAGES } from '../game/content';
 import { FIELD_BY_ID, fieldWins, KIND_NAME } from '../game/fields';
 import type { Run } from '../game/run';
 import type { Line } from '../game/scoring';
@@ -18,8 +18,9 @@ export function chipFace(value: number): HTMLElement {
 
 export function itemDesc(t: Pick<ItemInstance, 'def' | 'counter' | 'gold'>): string {
   const d = ITEMS[t.def];
-  const step = (t.def === 'glocke' ? 0.2 : t.def === 'rabe' ? 0.5 : 0) * (t.gold ? 2 : 1);
-  return ((t.gold && GOLD_DESC[t.def]) || d.desc).replace('{n}', fmtMult(t.counter * step));
+  const step = (t.def === 'glocke' ? 0.2 : t.def === 'rabe' ? 0.4 : 0) * (t.gold ? 2 : 1);
+  const now = t.def === 'rabe' ? Math.min(3 * (t.gold ? 2 : 1), t.counter * step) : t.counter * step;
+  return ((t.gold && GOLD_DESC[t.def]) || d.desc).replace('{n}', fmtMult(now));
 }
 
 /** Name with a star for golden talismans. */
@@ -40,7 +41,7 @@ export function fieldChance(run: Run, fieldId: string, ch = run.finalChances()):
   const f = FIELD_BY_ID[fieldId];
   let win = 0;
   run.wheel.forEach((p, i) => {
-    if (fieldWins(f, p) && !(f.kind === 'red' && run.activeRule === 'rotfluch')) win += ch[i];
+    if (fieldWins(f, p) && !cursed(f.kind, run.activeRule)) win += ch[i];
   });
   return win;
 }
@@ -68,7 +69,8 @@ function counter(sec: number): string {
   return `${Math.floor(s / 3600)}:${String(Math.floor(s / 60) % 60).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function renderOsd(run: Run, cash: number, tape: number): void {
+/** `compact`: walking around in first person, only the essentials stay on screen. */
+export function renderOsd(run: Run, cash: number, tape: number, compact = false): void {
   const box = $('osd');
   box.classList.remove('hidden');
   const due = run.phase === 'due';
@@ -80,8 +82,8 @@ export function renderOsd(run: Run, cash: number, tape: number): void {
     h('div', { class: 'line', html: `KASSE <span class="debt">${fmt(run.deposit)}</span>  ${run.deposit >= run.debt ? '<span class="money">RATE GEDECKT</span>' : covered ? `NOCH ${fmt(run.debt - run.deposit)} – BARGELD REICHT` : `<span class="warn-soft">FEHLT ${fmt(run.debt - run.deposit - run.cash)}</span>`}` }),
     h('div', { class: 'line', html: `BARGELD <span class="money">${fmt(cash)}</span>${run.stakeTotal ? `  IM SPIEL ${fmt(run.stakeTotal)}` : ''}` }),
     h('div', { class: 'line', html: `<span class="marks">◆${run.marks}</span>  <span class="luck">GLÜCK ${run.luck}</span>  ZINS ${pct(run.interestRate)}  TALISMANE ${run.items.length}/${run.perks.slots}` }),
-    run.news ? h('div', { class: 'line news', html: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }) : null,
-    h('div', {
+    run.news && !compact ? h('div', { class: 'line news', html: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }) : null,
+    compact ? null : h('div', {
       class: 'rule',
       html: run.rule
         ? `HAUSREGEL: ${run.activeRule ? '' : '<s>'}${RULES[run.rule].name}${run.activeRule ? '' : '</s> (SONNENBRILLE)'} – ${RULES[run.rule].desc}`
@@ -94,7 +96,7 @@ export function renderOsd(run: Run, cash: number, tape: number): void {
   const right = h('div', { class: 'right' },
     h('div', { class: 'play', html: `<span class="rec">●</span> ${counter(tape)}` }),
     h('div', { class: 'line', text: `${days[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}.${months[d.getMonth()]}.${d.getFullYear()}` }),
-    h('div', { class: 'line', text: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }),
+    compact ? null : h('div', { class: 'line', text: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }),
     run.stage ? h('div', { class: 'line debt', text: `STUFE ${run.stage}: ${STAGES[run.stage].name}` }) : null,
   );
   box.replaceChildren(left, right);
@@ -162,7 +164,7 @@ export function renderTableBar(run: Run, selected: number, hd: TableHandlers, bu
   const chips = $('chips');
   chips.replaceChildren();
   availableChips(run.cash + run.stakeTotal).forEach((v, i) => {
-    const b = h('button', { class: 'chipbtn' + (v === selected ? ' sel' : ''), onclick: () => hd.chip(v), disabled: v > run.cash });
+    const b = h('button', { class: 'chipbtn' + (v === selected ? ' sel' : ''), onclick: () => hd.chip(v), disabled: v > run.betLimit });
     b.append(chipFace(v), h('span', { class: 'k', text: `${i + 1}` }));
     chips.append(b);
   });
@@ -213,7 +215,13 @@ export function renderSlip(run: Run, show: boolean): void {
     return;
   }
   box.classList.remove('hidden');
-  const rows: HTMLElement[] = [h('div', { class: 'title', text: `WETTSCHEIN · DREH ${run.round}/${run.cycleRounds}` })];
+  const rows: HTMLElement[] = [
+    h('div', { class: 'title', text: `WETTSCHEIN · DREH ${run.round}/${run.cycleRounds}` }),
+    h('div', { class: 'limit' },
+      h('span', { text: `TISCHLIMIT ${fmt(run.stakeTotal)} / ${fmt(run.tableMax)}` }),
+      h('span', { text: `PLEIN MAX ${fmt(run.fieldMax('n1'))}` })),
+    h('div', { class: 'meter' }, h('i', { style: `width:${Math.min(100, (run.stakeTotal / run.tableMax) * 100)}%` })),
+  ];
   const bets = Object.entries(run.bets);
   const ch = run.finalChances();
   if (!bets.length) {
@@ -263,7 +271,7 @@ export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number
     return;
   }
   // Same field, same odds: only move the box instead of rebuilding it every frame.
-  const key = `${fieldId}|${run.stakeTotal}|${chances ? chances.length : 0}`;
+  const key = `${fieldId}|${run.stakeTotal}|${run.tableMax}|${chances ? chances.length : 0}`;
   box.style.left = `${x}px`;
   box.style.top = `${y}px`;
   if (key === lastFieldKey && lastFieldChances === chances && !box.classList.contains('hidden')) return;
@@ -276,7 +284,7 @@ export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number
     h('b', { text: f.kind === 'straight' ? `PLEIN ${f.label}` : f.numbers.length ? `${KIND_NAME[f.kind]} ${f.label}` : f.label }),
     h('div', { text: `QUOTE ${payout - 1}:1 (×${payout} ZURÜCK) · CHANCE ${pct(fieldChance(run, fieldId, chances))}${run.cubeField === fieldId ? ' · VERDREHT ×3' : ''}` }),
   );
-  if (stake) box.append(h('div', { text: `GESETZT ${fmt(stake)} · RECHTSKLICK ZURÜCK` }));
+  box.append(h('div', { text: `GESETZT ${fmt(stake)} VON MAX ${fmt(run.fieldMax(fieldId))}${stake ? ' · RECHTSKLICK ZURÜCK' : ''}` }));
   box.style.left = `${x}px`;
   box.style.top = `${y}px`;
   box.classList.remove('hidden');
@@ -354,6 +362,8 @@ export type MenuStyle = 'vcr' | 'clear' | 'black';
 
 export function openModal(content: HTMLElement, style: MenuStyle = 'vcr', onBackdrop?: () => void): void {
   const m = $('modal');
+  // Menus need the mouse pointer back.
+  if (document.pointerLockElement) document.exitPointerLock();
   m.className = style;
   m.replaceChildren(content);
   m.onclick = (e) => {

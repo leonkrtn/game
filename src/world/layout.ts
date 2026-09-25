@@ -133,5 +133,7 @@ export const OBSTACLES: Rect[] = [
   { x0: -6.45, z0: 3.35, x1: -4.15, z1: 5.1 },
   { x0: TABLE.x + TABLE.halfW + 0.2, z0: TABLE.z - 0.35, x1: TABLE.x + TABLE.halfW + 0.9, z1: TABLE.z + 0.55 },
   { x0: SMOKES.x - SMOKES.halfW - 0.05, z0: SMOKES.z - SMOKES.halfD, x1: ROOM_X1, z1: SMOKES.z + SMOKES.halfD },
+  // Pole of the results board at the table's wheel end.
+  { x0: TABLE.x - TABLE.halfW - 0.05, z0: TABLE.z - TABLE.halfD - 0.25, x1: TABLE.x - TABLE.halfW + 0.15, z1: TABLE.z - TABLE.halfD - 0.05 },
 ];
 

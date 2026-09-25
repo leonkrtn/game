@@ -20,7 +20,7 @@ import { World } from './world/world';
 
 type Mode = 'start' | 'room' | 'table' | 'spinning' | 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'shark' | 'caught' | 'over';
 
-const ROOM_HELP = '<span><kbd>WASD</kbd> LAUFEN</span><span><kbd>SHIFT</kbd> RENNEN</span><span><kbd>E</kbd> BENUTZEN</span><span><kbd>TAB</kbd> ÜBERSICHT</span><span><kbd>V</kbd> RAD</span><span><kbd>M</kbd> TON</span>';
+const ROOM_HELP = '<span><kbd>MAUS</kbd> UMSEHEN (KLICK)</span><span><kbd>WASD</kbd> LAUFEN</span><span><kbd>SHIFT</kbd> RENNEN</span><span><kbd>E</kbd> BENUTZEN</span><span><kbd>TAB</kbd> ÜBERSICHT</span><span><kbd>V</kbd> RAD</span>';
 
 export class Game {
   private world: World;
@@ -46,6 +46,52 @@ export class Game {
   private caughtTimer = 0;
   private ringTimer = 0;
   private overview = false;
+
+  // ---- First-run tutorial: one hint at a time, each cleared by doing it ----------------
+
+  private static readonly TUTORIAL = [
+    'KLICK INS BILD UND SIEH DICH MIT DER MAUS UM. LAUF MIT <kbd>WASD</kbd> ZUM ROULETTETISCH UND DRÜCK <kbd>E</kbd>.',
+    'KLICK AUF EIN FELD, UM DEN GEWÄHLTEN JETON ZU SETZEN. RECHTS STEHEN QUOTEN, CHANCEN UND DAS TISCHLIMIT.',
+    '<kbd>LEER</kbd> DREHT DAS RAD. GEWINN = SUMME × MULT.',
+    'NACH 3 DREHS IST DIE RATE FÄLLIG. BEZAHL SIE AN DER KASSE (HINTEN RECHTS) – VORHER ODER WENN DIE HERREN KOMMEN.',
+    'DIE VITRINE (LINKS) VERKAUFT TALISMANE FÜR GLÜCKSMARKEN ◆. SIE ERHÖHEN DEN MULT – OHNE SIE GEWINNT DAS HAUS.',
+  ];
+
+  /** Shows the current tutorial hint, if any. */
+  private showHint(): void {
+    const step = this.profile.tutorial;
+    const el = $('hint');
+    const text = (this.mode === 'room' || this.mode === 'table') && !modalOpen() && step < Game.TUTORIAL.length ? Game.TUTORIAL[step] : '';
+    el.classList.toggle('hidden', !text);
+    if (text && el.innerHTML !== text) el.innerHTML = text;
+  }
+
+  /** Marks tutorial step `n` done (and all before it). */
+  private tutorialDone(n: number): void {
+    if (this.profile.tutorial > n) return;
+    this.profile.tutorial = n + 1;
+    saveProfile(this.profile);
+    this.showHint();
+  }
+  private dragLook = false;
+  private hintTick = -1;
+
+  /** Captures the mouse for first-person look. Some embeds refuse; then dragging still works. */
+  private capturePointer(): void {
+    const canvas = this.world.renderer.domElement;
+    if (document.pointerLockElement === canvas) return;
+    try {
+      const r = canvas.requestPointerLock() as unknown as Promise<void> | undefined;
+      r?.catch?.(() => undefined);
+    } catch {
+      // Pointer lock unavailable: drag to look.
+    }
+  }
+
+  private releasePointer(): void {
+    this.dragLook = false;
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
   private last = performance.now();
   /** Largest simulated step per frame; raised by automated tests on slow software renderers. */
   maxDt = 0.05;
@@ -55,13 +101,24 @@ export class Game {
     this.profile = loadProfile();
     this.run = new Run({ locked: lockedIds(this.profile) });
     this.world.wheel.onTick = (s) => sfx.tick(s);
+    this.world.onStep = () => sfx.step();
 
     const canvas = this.world.renderer.domElement;
     canvas.addEventListener('mousemove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
+      // First person: mouse look while the pointer is captured, or while dragging without capture.
+      if (this.mode === 'room' && !modalOpen() && (document.pointerLockElement === canvas || this.dragLook)) {
+        this.world.look(e.movementX, e.movementY);
+      }
     });
+    canvas.addEventListener('mouseup', () => (this.dragLook = false));
     canvas.addEventListener('mousedown', (e) => {
       sfx.unlock();
+      if (this.mode === 'room' && !modalOpen()) {
+        this.dragLook = true;
+        this.capturePointer();
+        return;
+      }
       if (this.mode === 'table') {
         if (e.button === 0) this.placeChip();
         if (e.button === 2) this.takeChip();
@@ -203,6 +260,8 @@ export class Game {
 
   private enterRoom(): void {
     this.mode = 'room';
+    this.dragLook = false;
+    this.osdDirty = true;
     this.world.cameraMode = 'room';
     this.world.standAtTable(false);
     this.world.hoverField = undefined;
@@ -218,6 +277,8 @@ export class Game {
   }
 
   private enterTable(): void {
+    this.releasePointer();
+    if (this.run.phase === 'betting') this.tutorialDone(0);
     if (this.run.phase !== 'betting') {
       toast('DIE RATE IST FÄLLIG. ERST AN DIE KASSE!');
       sfx.error();
@@ -231,6 +292,8 @@ export class Game {
     setHelp('');
     if (this.run.rule === 'eile' && this.rushLeft === undefined) this.rushLeft = RUSH_SECONDS;
     this.clampChip();
+    this.betWait = 2.5;
+    floater('FAITES VOS JEUX', window.innerWidth / 2, window.innerHeight * 0.22, '#fff', 40);
     this.renderTable();
     if (this.run.duel) toast(`DUELL: ${this.run.duel.name.toUpperCase()} SPIELT GEGEN DICH. GEWINN MEHR ALS ER!`, 'boss');
     else if (this.run.roundsLeft === 1) toast('LETZTER DREH VOR DER RATE. <kbd>H</kbd> = HOCHRISIKO.');
@@ -345,6 +408,7 @@ export class Game {
   }
 
   private openVitrine(): void {
+    if (this.profile.tutorial >= 4) this.tutorialDone(4);
     this.mode = 'vitrine';
     this.world.cameraMode = 'vitrine';
     this.world.standAt('vitrine');
@@ -440,6 +504,7 @@ export class Game {
   private pay(): void {
     const n = this.run.cycle + 1;
     if (!this.run.pay()) return;
+    this.tutorialDone(3);
     sfx.cash();
     this.world.dismissThugs();
     this.rushLeft = undefined;
@@ -489,14 +554,14 @@ export class Game {
 
   private clampChip(): void {
     const list = availableChips(this.run.moneyBefore);
-    if (!list.includes(this.chip) || this.chip > this.run.cash) {
-      const fits = list.filter((v) => v <= this.run.cash);
+    if (!list.includes(this.chip) || this.chip > this.run.betLimit) {
+      const fits = list.filter((v) => v <= this.run.betLimit);
       this.chip = fits.length ? fits[Math.max(0, fits.length - 3)] : list[0];
     }
   }
 
   private selectChip(v: number): void {
-    if (v > this.run.cash) return;
+    if (v > this.run.betLimit) return;
     this.chip = v;
     sfx.select();
     this.renderTable();
@@ -506,14 +571,22 @@ export class Game {
     if (!this.hover) return;
     if (!this.run.placeBet(this.hover, this.chip)) {
       sfx.error();
-      if (this.run.activeRule === 'limit' && this.chip <= this.run.cash) toast('TISCHLIMIT: HÖCHSTENS EIN VIERTEL DEINES GELDES PRO DREH.');
+      if (this.chip <= this.run.cash) {
+        const room = this.run.fieldRoom(this.hover);
+        toast(room > 0
+          ? `HIER PASSEN NUR NOCH ${fmt(room)} HIN – NIMM EINEN KLEINEREN JETON.`
+          : this.run.betLimit === 0
+            ? `TISCHLIMIT ERREICHT: HÖCHSTENS ${fmt(this.run.tableMax)} PRO DREH.`
+            : `DIESES FELD IST VOLL: HÖCHSTENS ${fmt(this.run.fieldMax(this.hover))}.`);
+      }
       return;
     }
     this.world.placeChip(this.hover, this.chip);
+    this.tutorialDone(1);
     sfx.chip();
     this.confirmEmpty = false;
     this.shownCash = this.run.cash;
-    if (this.chip > this.run.cash) this.clampChip();
+    if (this.chip > this.run.betLimit) this.clampChip();
     this.renderTable();
   }
 
@@ -587,8 +660,15 @@ export class Game {
     this.renderTable();
   }
 
+  /** Seconds until the croupier takes the next spin: time to place bets, and no rapid-fire spinning. */
+  private betWait = 0;
+
   private spin(force = false): void {
     if (this.mode !== 'table' || this.run.phase !== 'betting') return;
+    if (this.betWait > 0 && !force) {
+      toast('EINEN MOMENT – DER CROUPIER NIMMT NOCH EINSÄTZE AN.');
+      return;
+    }
     if (this.run.stakeTotal === 0 && !force && !this.confirmEmpty) {
       this.confirmEmpty = true;
       toast('NOCH NICHTS GESETZT. <kbd>LEER</kbd> NOCHMAL = TROTZDEM DREHEN.');
@@ -599,6 +679,7 @@ export class Game {
     $('timer').classList.add('hidden');
     renderSlip(this.run, false);
     const bribed = this.run.bribed;
+    this.tutorialDone(2);
     const r = this.run.spin();
     if (bribed && !this.run.bribePaid) {
       toast('FÜR DIE BESTECHUNG FEHLT DIR DAS GELD. DER CROUPIER WIRFT GANZ NORMAL.');
@@ -816,7 +897,7 @@ export class Game {
   }
 
   private renderOsdNow(): void {
-    renderOsd(this.run, Math.round(this.shownCashValue), this.tape);
+    renderOsd(this.run, Math.round(this.shownCashValue), this.tape, this.mode === 'room');
     this.osdDirty = false;
   }
 
@@ -859,6 +940,12 @@ export class Game {
       }
     }
 
+    $('crosshair').classList.toggle('hidden', !(this.mode === 'room' && !modalOpen()));
+    if (Math.floor(this.tape * 2) !== this.hintTick) {
+      this.hintTick = Math.floor(this.tape * 2);
+      this.showHint();
+    }
+
     // Rolling cash counter and tape clock in the OSD.
     if (this.mode !== 'start' && this.mode !== 'over') {
       this.tape += dt;
@@ -886,7 +973,7 @@ export class Game {
       sfx.ring();
     }
 
-    const speed = this.mode === 'spinning' && this.input.isDown('Space') ? 3.5 : 1;
+    const speed = this.mode === 'spinning' && this.input.isDown('Space') ? 2 : 1;
     const ev = this.world.wheel.update(dt, speed);
     if (ev === 'landed') this.onFirstLanding();
     if (ev === 'done' && this.mode === 'spinning' && this.spinStage === 'rolling') this.onLanded();
@@ -896,9 +983,13 @@ export class Game {
   private frameRoom(dt: number, presses: string[]): void {
     const a = this.input.axis();
     const sprint = this.input.isDown('ShiftLeft') || this.input.isDown('ShiftRight');
+    // Arrow keys turn the view (for players without a mouse, or without pointer capture).
+    const turn = (this.input.isDown('ArrowLeft') ? 1 : 0) - (this.input.isDown('ArrowRight') ? 1 : 0);
+    if (turn) this.world.look(-turn * dt * 900, 0);
     this.world.movePlayer(dt, new THREE.Vector2(a.x, a.y), sprint);
 
-    const spot = this.world.nearKasse() ? 'kasse' : this.world.nearVitrine() ? 'vitrine' : this.world.nearPhone() ? 'phone' : this.world.nearSmokes() ? 'smokes' : this.world.nearTable() ? 'table' : undefined;
+    const spot = this.world.focus();
+    $('crosshair').classList.toggle('on', !!spot);
     const due = this.run.phase === 'due';
     switch (spot) {
       case 'kasse': setPrompt(`<kbd>E</kbd> KASSE${due ? ' – RATE BEZAHLEN' : ''}`); break;
@@ -921,11 +1012,16 @@ export class Game {
   }
 
   private hoverItems(): void {
-    const uid = this.mouse.x >= 0 ? this.world.pickItem(this.mouse.x, this.mouse.y) : undefined;
-    renderItemTip(this.run, uid, this.mouse.x, this.mouse.y);
+    // In the room you look with the crosshair; at the table you point with the mouse.
+    const fp = this.mode === 'room';
+    const x = fp ? window.innerWidth / 2 : this.mouse.x;
+    const y = fp ? window.innerHeight / 2 : this.mouse.y;
+    const uid = x >= 0 ? this.world.pickItem(x, y) : undefined;
+    renderItemTip(this.run, uid, x, y);
   }
 
   private frameTable(dt: number, presses: string[]): void {
+    if (this.betWait > 0) this.betWait -= dt;
     this.world.movePlayer(dt, new THREE.Vector2(), false);
     const list = availableChips(this.run.moneyBefore);
     for (const k of presses) {
@@ -954,7 +1050,7 @@ export class Game {
       this.world.hoverField = field && FIELD_BY_ID[field].numbers.length <= 1 ? field : undefined;
       this.world.hoverCells = new Set(field ? coveredCells(this.run, field) : []);
     }
-    this.world.setGhost(this.chip <= this.run.cash ? this.chip : undefined, field);
+    this.world.setGhost(field && this.chip <= this.run.fieldRoom(field) ? this.chip : undefined, field);
     // Odds only change when the table changes (renderTable clears this), not every frame.
     this.chanceCache ??= this.run.finalChances();
     renderFieldInfo(this.run, field, this.mouse.x, this.mouse.y - 14, this.chanceCache);

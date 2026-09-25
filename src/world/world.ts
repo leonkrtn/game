@@ -21,6 +21,7 @@ import { mergeStatic } from './merge';
 import { buildCasino, smoke, type Casino } from './room';
 import { boardTexture, BOARD_SIZE, chipSideTexture, chipTexture } from './textures';
 import { faceEllipses, MAX_FACES, VhsShader } from './vhs';
+import { resolve } from './nav';
 import { Wheel3D } from './wheel3d';
 
 const CHIP_H = 0.0105;
@@ -28,6 +29,7 @@ const CHIP_R = 0.0195;
 const WALK = 1.7;
 const SPRINT = 3.6;
 const PLAYER_R = 0.3;
+const PERSON_R = 0.28;
 
 interface Tween {
   t: number;
@@ -465,35 +467,123 @@ export class World {
   // ---- Player movement -------------------------------------------------------
 
   /** `move` is a screen-relative direction in the XZ plane (length ≤ 1). */
+  // ---- First person ------------------------------------------------------------------
+
+  /** View direction: yaw 0 looks along -z (from the entrance side towards the table). */
+  yaw = 0;
+  pitch = -0.08;
+  private bob = 0;
+  private stepPhase = 0;
+  /** Called on every footstep, for the sound. */
+  onStep?: () => void;
+
+  /** Turns the view by a mouse movement (pixels). */
+  look(dx: number, dy: number): void {
+    const sens = 0.0024;
+    this.yaw -= dx * sens;
+    this.pitch = THREE.MathUtils.clamp(this.pitch - dy * sens, -1.2, 1.0);
+  }
+
+  /** Faces the view towards a point on the floor plan. */
+  lookAtPoint(x: number, z: number, pitch = -0.1): void {
+    const p = this.player.group.position;
+    this.yaw = Math.atan2(-(x - p.x), -(z - p.z));
+    this.pitch = pitch;
+  }
+
+  private forward(out: THREE.Vector3): THREE.Vector3 {
+    return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+  }
+
+  /** `move`: x = strafe right, y = backwards (as WASD reports it), relative to the view. */
   movePlayer(dt: number, move: THREE.Vector2, sprint: boolean): void {
     const speed = sprint ? SPRINT : WALK;
-    const target = new THREE.Vector3(move.x * speed, 0, move.y * speed);
+    const f = this.forward(this.tmpWorld);
+    const rx = -f.z, rz = f.x;
+    const target = new THREE.Vector3((rx * move.x - f.x * move.y) * speed, 0, (rz * move.x - f.z * move.y) * speed);
     this.velocity.lerp(target, 1 - Math.exp(-(move.lengthSq() > 0 ? 10 : 14) * dt));
     const p = this.player.group.position;
     p.addScaledVector(this.velocity, dt);
     this.collide(p);
     const v = Math.hypot(this.velocity.x, this.velocity.z);
-    if (v > 0.15) this.player.face(this.velocity.x, this.velocity.z, dt, 8);
+    this.player.heading = this.yaw + Math.PI;
     this.player.setSpeed(v);
+    // Head bob and footsteps.
+    if (v > 0.2) {
+      const before = Math.sin(this.stepPhase);
+      this.stepPhase += dt * v * 5.2;
+      if (before > 0 && Math.sin(this.stepPhase) <= 0) this.onStep?.();
+      if (before < 0 && Math.sin(this.stepPhase) >= 0) this.onStep?.();
+    }
+    this.bob += ((v > 0.2 ? 1 : 0) - this.bob) * Math.min(1, dt * 6);
   }
 
-  private collide(p: THREE.Vector3): void {
-    const r = PLAYER_R;
-    p.x = THREE.MathUtils.clamp(p.x, ROOM.x0 + r + 0.1, ROOM.x1 - r - 0.1);
-    p.z = THREE.MathUtils.clamp(p.z, ROOM.z0 + r + 0.1, ROOM.z1 - r - 0.2);
-    for (const o of OBSTACLES) {
-      const cx = THREE.MathUtils.clamp(p.x, o.x0, o.x1);
-      const cz = THREE.MathUtils.clamp(p.z, o.z0, o.z1);
-      const dx = p.x - cx, dz = p.z - cz;
+  /** What the player is looking at and close enough to use. */
+  focus(): 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'table' | undefined {
+    const p = this.player.group.position;
+    const f = this.forward(this.tmpWorld);
+    const t = TABLE;
+    const targets: { id: 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'table'; x: number; z: number; reach: number }[] = [
+      { id: 'kasse', x: KASSE.x, z: KASSE.z + KASSE.halfD, reach: 1.9 },
+      { id: 'vitrine', x: VITRINE.x + VITRINE.halfW, z: VITRINE.z, reach: 1.8 },
+      { id: 'phone', x: PHONE.x, z: PHONE.z, reach: 1.6 },
+      { id: 'smokes', x: SMOKES.x - SMOKES.halfW, z: SMOKES.z, reach: 1.6 },
+      // The table's nearest edge point, so it can be used from its whole long side.
+      { id: 'table', x: THREE.MathUtils.clamp(p.x, t.x - t.halfW + 0.3, t.x + t.halfW), z: THREE.MathUtils.clamp(p.z, t.z - t.halfD, t.z + t.halfD), reach: 1.25 },
+    ];
+    let best: (typeof targets)[number]['id'] | undefined;
+    let bestDot = Math.cos(0.75);
+    for (const g of targets) {
+      const dx = g.x - p.x, dz = g.z - p.z;
       const d = Math.hypot(dx, dz);
-      if (d < r && d > 1e-6) {
-        p.x = cx + (dx / d) * r;
-        p.z = cz + (dz / d) * r;
-      } else if (d <= 1e-6) {
-        p.z = o.z1 + r;
+      if (d > g.reach) continue;
+      const dot = d < 0.35 ? 1 : (dx * f.x + dz * f.z) / d;
+      if (dot > bestDot) {
+        bestDot = dot;
+        best = g.id;
       }
     }
+    return best;
   }
+
+  /** Keeps the player out of furniture and out of other people. */
+  private collide(p: THREE.Vector3): void {
+    for (const h of this.people) {
+      if (h === this.player || !h.group.visible) continue;
+      const q = h.group.position;
+      const dx = p.x - q.x, dz = p.z - q.z;
+      const d = Math.hypot(dx, dz);
+      const min = PLAYER_R + PERSON_R;
+      if (d < min && d > 1e-6) {
+        p.x = q.x + (dx / d) * min;
+        p.z = q.z + (dz / d) * min;
+      }
+    }
+    resolve(p, PLAYER_R);
+  }
+
+  /** People step aside for each other and never stand inside furniture. */
+  private separatePeople(): void {
+    const fixed = new Set<Human>([this.croupier, this.cashier, ...this.guests]);
+    const movers = this.people.filter((h) => h !== this.player && h.group.visible && !fixed.has(h));
+    for (const a of movers) {
+      const pa = a.group.position;
+      for (const b of this.people) {
+        if (b === a || !b.group.visible) continue;
+        const pb = b.group.position;
+        const dx = pa.x - pb.x, dz = pa.z - pb.z;
+        const d = Math.hypot(dx, dz);
+        const min = PERSON_R * 2;
+        if (d >= min || d < 1e-6) continue;
+        // Moving people give way to fixed ones and to the player; two walkers share the push.
+        const share = fixed.has(b) || b === this.player ? 1 : 0.5;
+        pa.x += (dx / d) * (min - d) * share;
+        pa.z += (dz / d) * (min - d) * share;
+      }
+      resolve(pa, PERSON_R);
+    }
+  }
+
 
   distTo(spot: { x: number; z: number }): number {
     const p = this.player.group.position;
@@ -521,8 +611,9 @@ export class World {
   /** Puts the player a few steps into the room, looking at the table. */
   resetPlayer(): void {
     this.player.group.position.set(TABLE.x - 0.4, 0, TABLE.z + 2.6);
-    this.player.heading = Math.PI;
-    this.player.group.visible = true;
+    this.yaw = 0;
+    this.pitch = -0.12;
+    this.player.group.visible = false;
     this.velocity.set(0, 0, 0);
   }
 
@@ -535,17 +626,20 @@ export class World {
     const p = this.player.group.position;
     if (atTable) {
       p.set(TABLE_SPOT.x, 0, TABLE_SPOT.z);
-      this.player.heading = Math.PI;
+    } else {
+      // Step back from the table, looking at it.
+      this.yaw = 0;
+      this.pitch = -0.35;
     }
-    this.player.group.visible = !atTable;
+    // First person: you never see your own body.
+    this.player.group.visible = false;
     this.velocity.set(0, 0, 0);
   }
 
   standAt(where: 'kasse' | 'vitrine' | 'phone' | 'smokes'): void {
     const spot = where === 'kasse' ? KASSE_SPOT : where === 'vitrine' ? VITRINE_SPOT : where === 'smokes' ? SMOKES_SPOT : PHONE_SPOT;
     this.player.group.position.set(spot.x, 0, spot.z);
-    this.player.heading = where === 'kasse' ? Math.PI : where === 'vitrine' ? -Math.PI / 2 : Math.PI / 2;
-    this.player.group.visible = true;
+    this.player.group.visible = false;
     this.velocity.set(0, 0, 0);
   }
 
@@ -944,12 +1038,12 @@ export class World {
     const p = this.player.group.position;
     const r = this.rival;
     if (this.rivalState === 'coming' || this.rivalState === 'here') {
-      if (r.walkTo(RIVAL_SPOT.x, RIVAL_SPOT.z, dt, 1.2)) {
+      if (r.walkPath(RIVAL_SPOT.x, RIVAL_SPOT.z, dt, 1.2)) {
         this.rivalState = 'here';
         r.face(TABLE.x + TABLE_LAYOUT.x - RIVAL_SPOT.x, TABLE.z - RIVAL_SPOT.z, dt, 4);
       }
     } else if (this.rivalState === 'leaving') {
-      if (r.walkTo(DOOR.x + 0.3, DOOR.z + 0.2, dt, 1.4)) {
+      if (r.walkPath(DOOR.x + 0.3, DOOR.z + 0.45, dt, 1.4)) {
         r.group.visible = false;
         this.rivalState = 'away';
       }
@@ -957,12 +1051,12 @@ export class World {
     const sh = this.shark;
     if (this.sharkState === 'coming' || this.sharkState === 'here') {
       const tx = p.x + 0.9, tz = p.z + 0.7;
-      if (sh.walkTo(tx, tz, dt, 1.3) || this.sharkState === 'here') {
+      if (sh.walkPath(tx, tz, dt, 1.3) || this.sharkState === 'here') {
         this.sharkState = 'here';
         sh.face(p.x - sh.group.position.x, p.z - sh.group.position.z, dt, 4);
       }
     } else if (this.sharkState === 'leaving') {
-      if (sh.walkTo(DOOR.x, DOOR.z + 0.2, dt, 1.5)) {
+      if (sh.walkPath(DOOR.x, DOOR.z + 0.45, dt, 1.5)) {
         sh.group.visible = false;
         this.sharkState = 'away';
       }
@@ -990,7 +1084,6 @@ export class World {
     this.thugState = 'attacking';
     this.distort(1.5);
     this.thugs.forEach((t) => (t.group.visible = true));
-    this.player.group.visible = true;
   }
 
   private updateThugs(dt: number): void {
@@ -1004,7 +1097,7 @@ export class World {
       switch (this.thugState) {
         case 'coming':
         case 'waiting': {
-          const arrived = t.walkTo(posts[i].x, posts[i].z, dt, 1.3);
+          const arrived = t.walkPath(posts[i].x, posts[i].z, dt, 1.3);
           if (arrived) {
             t.face(p.x - t.group.position.x, p.z - t.group.position.z, dt, 3);
             if (this.thugState === 'coming' && i === 1) {
@@ -1015,11 +1108,11 @@ export class World {
           break;
         }
         case 'leaving':
-          if (t.walkTo(DOOR.x + (i - 0.5) * 0.5, DOOR.z + 0.2, dt, 1.6)) t.group.visible = false;
+          if (t.walkPath(DOOR.x + (i - 0.5) * 0.5, DOOR.z + 0.45, dt, 1.6)) t.group.visible = false;
           break;
         case 'attacking': {
           const side = i === 0 ? -0.6 : 0.6;
-          if (t.walkTo(p.x + side, p.z + 0.15, dt, 2.2)) t.face(-side, 0, dt, 6);
+          if (t.walkPath(p.x + side, p.z + 0.15, dt, 2.2)) t.face(p.x - t.group.position.x, p.z - t.group.position.z, dt, 6);
           break;
         }
       }
@@ -1148,6 +1241,7 @@ export class World {
     this.cashier.face(pp.x - kp.x, pp.z - kp.z, dt, 2);
     this.updateThugs(dt);
     this.updateVisitors(dt);
+    this.separatePeople();
     for (const g of this.guests) if (Math.random() < dt * 0.05) g.play('agree');
     for (const h of this.people) h.update(dt);
 
@@ -1179,6 +1273,9 @@ export class World {
     this.vhs.uniforms.faceCount.value = faceEllipses(this.camera, heads, faces);
   }
 
+  private caughtT = 0;
+  /** Eye height of the player in meters. */
+  readonly eyeHeight = 1.64;
   private readonly tmpPos = new THREE.Vector3();
   private readonly tmpLook = new THREE.Vector3();
   private readonly tmpWorld = new THREE.Vector3();
@@ -1200,10 +1297,14 @@ export class World {
         rate = 1.5;
         break;
       }
-      case 'room':
-        pos.set(p.x * 0.8, 2.75, Math.min(p.z + 3.2, ROOM.z1 - 0.2));
-        look.set(p.x * 0.85, 0.95, p.z - 0.8);
+      case 'room': {
+        const eye = this.eyeHeight + Math.abs(Math.sin(this.stepPhase)) * 0.035 * this.bob;
+        pos.set(p.x, eye, p.z);
+        const cp = Math.cos(this.pitch);
+        look.set(p.x - Math.sin(this.yaw) * cp, eye + Math.sin(this.pitch), p.z - Math.cos(this.yaw) * cp);
+        rate = 60;
         break;
+      }
       case 'table': {
         const aspect = this.camera.aspect;
         const back = aspect < 1.5 ? 1 + (1.5 - aspect) * 1.1 : 1;
@@ -1223,42 +1324,55 @@ export class World {
         rate = 3.5;
         break;
       }
+      // Close-ups are still seen through your own eyes, just framed on what you use.
       case 'kasse':
-        pos.set(KASSE.x - 1.1, 1.9, KASSE.z + 2.8);
-        look.set(KASSE.x, 1.35, KASSE.z);
+        pos.set(KASSE_SPOT.x - 0.15, this.eyeHeight, KASSE_SPOT.z + 0.35);
+        look.set(KASSE.x, 1.45, KASSE.z - 0.3);
         break;
       case 'vitrine':
-        pos.set(VITRINE.x + 2.0, 1.65, VITRINE.z + 0.6);
-        look.set(VITRINE.x, 1.1, VITRINE.z);
+        pos.set(VITRINE_SPOT.x + 0.25, this.eyeHeight - 0.05, VITRINE_SPOT.z + 0.15);
+        look.set(VITRINE.x, 1.15, VITRINE.z);
         break;
       case 'phone':
-        pos.set(PHONE.x - 1.6, 1.7, PHONE.z + 0.9);
+        pos.set(PHONE_SPOT.x - 0.1, this.eyeHeight, PHONE_SPOT.z + 0.2);
         look.set(PHONE.x, PHONE.y, PHONE.z);
         break;
       case 'smokes':
-        pos.set(SMOKES.x - 2.0, 1.6, SMOKES.z + 0.9);
-        look.set(SMOKES.x, 1.15, SMOKES.z);
+        pos.set(SMOKES_SPOT.x - 0.2, this.eyeHeight, SMOKES_SPOT.z + 0.2);
+        look.set(SMOKES.x, 1.2, SMOKES.z);
         break;
       case 'shark': {
+        // You look up at the man in white.
         const sp = this.shark.group.position;
-        pos.set((p.x + sp.x) / 2 - 0.6, 1.75, Math.max(p.z, sp.z) + 2.2);
-        look.set((p.x + sp.x) / 2, 1.3, (p.z + sp.z) / 2);
-        rate = 2.5;
+        pos.set(p.x, this.eyeHeight, p.z);
+        look.set(sp.x, 1.55, sp.z);
+        rate = 3;
         break;
       }
-      case 'caught':
-        pos.set(p.x + 1.4, 1.75, p.z + 2.4);
-        look.set(p.x, 1.25, p.z);
-        rate = 2;
+      case 'caught': {
+        // They grab you: the view sinks and tilts while they close in.
+        const a = this.thugs[0].group.position, b = this.thugs[1].group.position;
+        pos.set(p.x, this.eyeHeight - 0.45 * Math.min(1, this.caughtT / 2.5), p.z);
+        look.set((a.x + b.x) / 2, 1.55, (a.z + b.z) / 2);
+        rate = 3;
         break;
+      }
     }
-    const k = 1 - Math.exp(-rate * dt);
-    this.camPos.lerp(pos, k);
-    this.camLook.lerp(look, k);
+    if (this.cameraMode === 'caught') this.caughtT += dt;
+    else this.caughtT = 0;
+    // First person: once the camera has arrived in your head, it follows the mouse exactly.
+    if (this.cameraMode === 'room' && this.camPos.distanceTo(pos) < 0.12) {
+      this.camPos.copy(pos);
+      this.camLook.copy(look);
+    } else {
+      const k = 1 - Math.exp(-(this.cameraMode === 'room' ? 7 : rate) * dt);
+      this.camPos.lerp(pos, k);
+      this.camLook.lerp(look, k);
+    }
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
-    // Handheld feel: the camera breathes a little.
-    this.camera.rotation.z += Math.sin(this.time * 0.7) * 0.002;
+    // Handheld feel: the camera breathes a little; when caught, the world tips over.
+    this.camera.rotation.z += Math.sin(this.time * 0.7) * 0.002 + (this.cameraMode === 'caught' ? Math.min(1, this.caughtT / 2.5) * 0.35 : 0);
     if (this.shakeAmt > 0.001) {
       const a = this.shakeAmt;
       this.camera.position.x += (Math.random() - 0.5) * a * 0.04;

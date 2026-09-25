@@ -33,7 +33,7 @@ export const ITEMS: Record<string, ItemDef> = Object.fromEntries([
   I('kleeblatt', 'Kleeblatt im Topf', 'common', 'Jede bezahlte Rate: +2 Glücksmarken.'),
   I('sanduhr', 'Sanduhr', 'common', 'Letzter Dreh vor der Rate: ×2 Mult.'),
   I('glocke', 'Messingglocke', 'common', 'Jeder Dreh mit Gewinn: dauerhaft +0,2 Mult (aktuell +{n}).'),
-  I('rabe', 'Rabe', 'common', 'Jeder Dreh ohne Gewinn: dauerhaft +0,5 Mult (aktuell +{n}).'),
+  I('rabe', 'Rabe', 'common', 'Jeder Dreh ohne Gewinn: dauerhaft +0,4 Mult, höchstens +3 (aktuell +{n}).'),
   I('zinnsoldat', 'Zinnsoldat', 'common', 'Liegen Einsätze auf mindestens 4 Feldern: +1 Mult.'),
   I('totenkopf', 'Totenkopf', 'rare', 'Kugel auf 0: ×6 Mult. Die 0 zieht die Kugel stärker an.'),
   I('winkekatze', 'Winkekatze', 'rare', 'Gewinnt ein Plein (Einzelzahl): ×2 Mult.'),
@@ -53,6 +53,7 @@ export const ITEMS: Record<string, ItemDef> = Object.fromEntries([
   I('polaroid', 'Polaroid', 'rare', 'Fällt dieselbe Zahl wie beim Dreh davor: ×5 Mult.'),
   I('voodoo', 'Voodoo-Puppe', 'rare', 'Jede Rate ist 15 % niedriger. Aber jeder dritte Nachhopser springt gegen dich.'),
   I('goldkette', 'Goldkettchen', 'rare', '+0,1 Mult pro $50 Bargeld vor dem Einsatz (höchstens +3).'),
+  I('clubkarte', 'Clubkarte', 'rare', 'Das Tischlimit ist doppelt so hoch.'),
   I('sonnenbrille', 'Sonnenbrille', 'legendary', 'Hausregeln gelten für dich nicht.'),
   I('kristallkugel', 'Kristallkugel', 'legendary', 'Zeigt vor jedem Dreh 3 Fächer. Mit 40 % Chance landet die Kugel in einem davon.'),
   I('goldkugel', 'Goldene Kugel', 'legendary', 'Glück +3. Nachhopser können bis zu zwei Fächer weit springen.', 3),
@@ -93,13 +94,14 @@ export const POCKET_MOD_INFO: Record<PocketModId, { name: string; short: string;
 
 // ---- House rules ------------------------------------------------------------
 
-export type RuleId = 'eile' | 'rotfluch' | 'geiz' | 'limit' | 'halbzahl' | 'nullnebel';
+export type RuleId = 'eile' | 'rotfluch' | 'schwarzfluch' | 'geiz' | 'limit' | 'halbzahl' | 'nullnebel';
 
 export const RULES: Record<RuleId, { id: RuleId; name: string; desc: string }> = {
   eile: { id: 'eile', name: 'Rien ne va plus!', desc: 'Am Tisch hast du nur 15 Sekunden zum Setzen, dann dreht der Croupier.' },
   rotfluch: { id: 'rotfluch', name: 'Roter Fluch', desc: 'Wetten auf Rot verlieren immer.' },
+  schwarzfluch: { id: 'schwarzfluch', name: 'Schwarzer Fluch', desc: 'Wetten auf Schwarz verlieren immer.' },
   geiz: { id: 'geiz', name: 'Ungeduldige Gläubiger', desc: 'Die Rate ist einen Dreh früher fällig.' },
-  limit: { id: 'limit', name: 'Tischlimit', desc: 'Du darfst pro Dreh höchstens ein Viertel deines Bargelds setzen.' },
+  limit: { id: 'limit', name: 'Strenger Saalchef', desc: 'Das Tischlimit ist halbiert.' },
   halbzahl: { id: 'halbzahl', name: 'Halbe Sache', desc: 'Pleins (Einzelzahlen) zahlen nur ×18.' },
   nullnebel: { id: 'nullnebel', name: 'Hungrige Null', desc: 'Fächer mit der 0 ziehen die Kugel stark an (Gewicht ×4).' },
 };
@@ -123,6 +125,7 @@ export const OFFERS: Record<string, OfferDef> = {
   stundung: { id: 'stundung', name: 'Stundung', desc: 'Die nächste Rate sinkt um 30 %, die übernächste steigt um 15 %.', weight: 2 },
   rotplus: { id: 'rotplus', name: 'Rote Tinte', desc: 'Kugel auf Rot: +0,5 Mult, dauerhaft.', weight: 2 },
   schwarzplus: { id: 'schwarzplus', name: 'Schwarzes Buch', desc: 'Kugel auf Schwarz: +0,5 Mult, dauerhaft.', weight: 2 },
+  vip: { id: 'vip', name: 'Ein Wort beim Saalchef', desc: 'Tischlimit +50 %, dauerhaft.', weight: 3 },
   goldfach: { id: 'goldfach', name: 'Ein Geschenk', desc: 'Ein zufälliges Fach wird zum Goldfach.', weight: 2 },
   kristallfach: { id: 'kristallfach', name: 'Ein Kristall', desc: 'Ein zufälliges Fach wird zum Kristallfach.', weight: 2 },
 };
@@ -164,6 +167,15 @@ export const STAGES = [
 /** Rate due after each cycle. Paying the last one wins the run. */
 export const DEBTS = [30, 55, 100, 190, 380, 760, 1550, 3300];
 export const ROUNDS_PER_CYCLE = 3;
+
+/**
+ * Table maximum: the most you may have on the felt in one spin, for each rate (like a real
+ * casino's table limit). Nobody can simply push everything in: growing takes a build that
+ * multiplies what the table allows. Inside bets have their own, smaller maximum per field.
+ */
+export const TABLE_LIMITS = [25, 40, 75, 140, 280, 560, 1150, 2400];
+/** A plein may carry at most this share of the table maximum; splits, streets … scale with their numbers. */
+export const PLEIN_SHARE = 0.25;
 export const BASE_INTEREST = 0.08;
 export const START_SLOTS = 4;
 export const MAX_SLOTS = 7;
@@ -197,7 +209,7 @@ export const GOLD_DESC: Record<string, string> = {
   hufeisen: 'Glück +2.', pfennig: 'Jede gewinnende Wette: +$10 Summe.', kerze: 'Kugel auf Rot: +2 Mult.', katze: 'Kugel auf Schwarz: +2 Mult.',
   wuerfel: 'Gewinnt eine einfache Chance: +2 Mult.', abakus: 'Gewinnt ein Dutzend oder eine Kolonne: +3 Mult.', sparschwein: 'Zinsen +8 %.',
   kleeblatt: 'Jede bezahlte Rate: +4 Glücksmarken.', sanduhr: 'Letzter Dreh vor der Rate: ×3 Mult.',
-  glocke: 'Jeder Dreh mit Gewinn: dauerhaft +0,4 Mult (aktuell +{n}).', rabe: 'Jeder Dreh ohne Gewinn: dauerhaft +1 Mult (aktuell +{n}).',
+  glocke: 'Jeder Dreh mit Gewinn: dauerhaft +0,4 Mult (aktuell +{n}).', rabe: 'Jeder Dreh ohne Gewinn: dauerhaft +0,8 Mult, höchstens +6 (aktuell +{n}).',
   zinnsoldat: 'Einsätze auf mindestens 4 Feldern: +2 Mult.', totenkopf: 'Kugel auf 0: ×11 Mult. Die 0 zieht die Kugel stärker an.',
   winkekatze: 'Gewinnt ein Plein: ×3 Mult.', magnet: 'Fächer mit deinen Plein-Zahlen: Gewicht ×3.', taschenuhr: '+2 Drehs vor jeder Rate.',
   goldbarren: 'Kugel in einem Goldfach: ×3 Mult.', police: 'Ohne Gewinn: 60 % der Einsätze zurück.', zigarre: 'Mindestens halbes Bargeld gesetzt: ×2 Mult.',
@@ -206,6 +218,7 @@ export const GOLD_DESC: Record<string, string> = {
   hasenpfote: 'Glück +2 für jeden freien Platz.', kassette: 'Gleicher Einsatz wie davor: +2 Mult.', zauberwuerfel: 'Verdrehtes Feld gewinnt: ×5 Mult.',
   polaroid: 'Dieselbe Zahl wie davor: ×9 Mult.', voodoo: 'Jede Rate 25 % niedriger. Jeder dritte Nachhopser springt gegen dich.',
   goldkette: '+0,2 Mult pro $50 Bargeld (höchstens +6).',
+  clubkarte: 'Das Tischlimit ist dreimal so hoch.',
 };
 
 export const canFuse = (def: string) => ITEMS[def].rarity !== 'legendary' && def in GOLD_DESC;
@@ -220,9 +233,9 @@ export interface SetDef {
 }
 
 export const SETS: SetDef[] = [
-  { id: 'achtziger', name: 'Mixtape 87', items: ['walkman', 'kassette', 'pager'], desc: 'Gewinnende Pleins, auch Pager-Treffer: ×3 Mult.' },
+  { id: 'achtziger', name: 'Mixtape 87', items: ['walkman', 'kassette', 'pager'], desc: 'Gewinnende Pleins, auch Pager-Treffer: ×4 Mult.' },
   { id: 'aberglaube', name: 'Aberglaube', items: ['hufeisen', 'kleeblatt', 'hasenpfote'], desc: 'Glück +3.' },
-  { id: 'nacht', name: 'Schwarze Nacht', items: ['rabe', 'katze', 'totenkopf'], desc: 'Kugel auf Schwarz oder 0: ×2 Mult.' },
+  { id: 'nacht', name: 'Schwarze Nacht', items: ['rabe', 'katze', 'totenkopf'], desc: 'Kugel auf Schwarz oder 0: ×1,75 Mult.' },
   { id: 'bank', name: 'Schweizer Konto', items: ['sparschwein', 'abakus', 'goldbarren'], desc: 'Zinsen +6 % und jede Rate 10 % niedriger.' },
   { id: 'feuer', name: 'Feuerteufel', items: ['kerze', 'zippo', 'sanduhr'], desc: 'Kugel auf Rot: ×2 Mult.' },
   { id: 'spieler', name: 'Alter Zocker', items: ['wuerfel', 'zigarre', 'winkekatze'], desc: 'Jede gewinnende Wette: +50 % Summe.' },
@@ -313,3 +326,8 @@ export const BRIBE_PULL = 2;
 // ---- Rival duels ---------------------------------------------------------------------------
 
 export const RIVAL_NAMES = ['Der Graf', 'Lackschuh-Kalle', 'Madame Rouge', 'Der Zahnarzt', 'Onkel Fritz'];
+
+/** A colour curse makes that colour's bet lose whatever the ball does. */
+export function cursed(kind: string, rule?: RuleId): boolean {
+  return (kind === 'red' && rule === 'rotfluch') || (kind === 'black' && rule === 'schwarzfluch');
+}

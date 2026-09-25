@@ -1,5 +1,5 @@
 import {
-  BALLS, BASE_INTEREST, BRIBE_PRICE, BRIBE_PULL, BRIBE_RISK, canFuse, CONSUMABLES, DEBTS, FUSE_EXTRA, ITEMS, itemPrice, MAX_CONSUMABLES,
+  BALLS, BASE_INTEREST, cursed, PLEIN_SHARE, TABLE_LIMITS, BRIBE_PRICE, BRIBE_PULL, BRIBE_RISK, canFuse, CONSUMABLES, DEBTS, FUSE_EXTRA, ITEMS, itemPrice, MAX_CONSUMABLES,
   MAX_SLOTS, NEWS, OFFERS, POCKET_ITEMS, RARITY, RIVAL_NAMES, ROUNDS_PER_CYCLE, RULES, SHARK_FACTOR, START_KITS, START_SLOTS,
   type PocketToolId, type RuleId,
 } from './content';
@@ -246,10 +246,30 @@ export class Run {
     return this.has('sonnenbrille') ? undefined : this.rule;
   }
 
-  /** Most that may still be added to the table this round. */
+  /** The table maximum for one spin: rises with the rate, raised by the club card and the phone. */
+  get tableMax(): number {
+    const base = this.cycle < TABLE_LIMITS.length ? TABLE_LIMITS[this.cycle] : roundNice(this.debt * 0.75);
+    const card = this.active('clubkarte').reduce((a, l) => a * (l === 2 ? 3 : 2), 1);
+    const m = base * card * (1 + 0.5 * (this.perks.vip ?? 0)) * (this.activeRule === 'limit' ? 0.5 : 1);
+    return Math.max(5, roundNice(m));
+  }
+
+  /** Most one field may carry: the table maximum outside, less for pleins and small inside bets. */
+  fieldMax(fieldId: string): number {
+    const f = FIELD_BY_ID[fieldId];
+    if (!f || !f.numbers.length) return this.tableMax;
+    const plein = Math.max(2, Math.round(this.tableMax * PLEIN_SHARE));
+    return Math.min(this.tableMax, plein * f.numbers.length);
+  }
+
+  /** Most that may still be added to the table this spin (cash and table limit). */
   get betLimit(): number {
-    if (this.activeRule !== 'limit') return this.cash;
-    return Math.max(0, Math.min(this.cash, Math.floor(this.moneyBefore / 4) - this.stakeTotal));
+    return Math.max(0, Math.min(this.cash, this.tableMax - this.stakeTotal));
+  }
+
+  /** Most that may still be added to one field. */
+  fieldRoom(fieldId: string): number {
+    return Math.max(0, Math.min(this.betLimit, this.fieldMax(fieldId) - stakeOf(this.bets[fieldId])));
   }
 
   has(def: string): boolean {
@@ -257,7 +277,10 @@ export class Run {
   }
 
   private rollRule(): RuleId {
-    return this.rng.pick(Object.keys(RULES) as RuleId[]);
+    // The two colour curses share one slot, so a curse is as likely as before and hits both colours equally.
+    const pool = (Object.keys(RULES) as RuleId[]).filter((r) => r !== 'schwarzfluch');
+    const r = this.rng.pick(pool);
+    return r === 'rotfluch' && this.rng.chance(0.5) ? 'schwarzfluch' : r;
   }
 
   private startCycle(): void {
@@ -302,7 +325,7 @@ export class Run {
   // ---- Betting ----------------------------------------------------------
 
   placeBet(fieldId: string, value: number): boolean {
-    if (this.phase !== 'betting' || this.highRisk || value <= 0 || value > this.betLimit || !FIELD_BY_ID[fieldId]) return false;
+    if (this.phase !== 'betting' || this.highRisk || value <= 0 || !FIELD_BY_ID[fieldId] || value > this.fieldRoom(fieldId)) return false;
     this.cash -= value;
     (this.bets[fieldId] ??= []).push(value);
     return true;
@@ -552,7 +575,7 @@ export class Run {
     if (!d) return;
     // The rival plays by the same house rules.
     const f = FIELD_BY_ID[d.fieldId];
-    const wins = fieldWins(f, r.pocket) && !(f.kind === 'red' && this.activeRule === 'rotfluch');
+    const wins = fieldWins(f, r.pocket) && !cursed(f.kind, this.activeRule);
     const pays = f.kind === 'straight' && this.activeRule === 'halbzahl' ? 18 : f.payout;
     const rivalNet = (wins ? d.stake * pays : 0) - d.stake;
     const playerNet = r.payout - r.stake + riskNet;
@@ -812,6 +835,7 @@ export class Run {
     const p = this.perks;
     switch (id) {
       case 'glueck': p.luck++; return 'Glück +1.';
+      case 'vip': p.vip = (p.vip ?? 0) + 1; return `Der Saalchef nickt: Tischlimit jetzt $${this.tableMax}.`;
       case 'zinsen': p.interest += 0.03; return 'Deine Einzahlung bringt jetzt 3 % mehr Zinsen.';
       case 'platz': p.slots = Math.min(MAX_SLOTS, p.slots + 1); return 'Auf dem Tisch ist Platz für einen weiteren Talisman.';
       case 'marken': this.marks += 4; return '+4 Glücksmarken.';
