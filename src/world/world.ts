@@ -471,6 +471,8 @@ export class World {
 
   /** View direction: yaw 0 looks along -z (from the entrance side towards the table). */
   yaw = 0;
+  /** Mouse sensitivity factor (settings). */
+  sensitivity = 1;
   pitch = -0.08;
   private bob = 0;
   private stepPhase = 0;
@@ -479,7 +481,7 @@ export class World {
 
   /** Turns the view by a mouse movement (pixels). */
   look(dx: number, dy: number): void {
-    const sens = 0.0024;
+    const sens = 0.0024 * this.sensitivity;
     this.yaw -= dx * sens;
     this.pitch = THREE.MathUtils.clamp(this.pitch - dy * sens, -1.2, 1.0);
   }

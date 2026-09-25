@@ -5,6 +5,12 @@ falschen Leuten und versuchst in einem kleinen Casino am Roulettetisch genug Gel
 
 ## Spielprinzip
 
+Du spielst in der Ich-Perspektive: Maus zum Umsehen, WASD zum Laufen, E an Tisch, Kasse, Vitrine,
+Telefon und Zigarettenautomat.
+
+- **Tischlimit.** Pro Dreh darf nur eine begrenzte Summe auf dem Tisch liegen (steigt mit jeder Rate),
+  Pleins und kleine Innenwetten haben ein eigenes, kleineres Maximum. Alles auf eine Zahl geht nicht –
+  wachsen muss man über einen Build, der den Mult erhöht (Clubkarte und ein Telefon-Deal heben das Limit).
 - **Echtes Geld setzen.** Du wählst einen Jeton-Wert ($1, $5, $25 …) und setzt dein Bargeld auf
   Felder, Linien und Ecken: Plein, Cheval, Transversale, Carré, Sechserreihe, Dutzend, Kolonne und
   einfache Chancen. Verlorene Einsätze sind weg.
@@ -50,8 +56,10 @@ Menüs und HUD sind im Stil eines Videorekorder-OSD gehalten.
 
 | Taste | Aktion |
 | --- | --- |
-| WASD / Pfeile, Shift | laufen, rennen |
-| E | Tisch, Kasse, Vitrine, Telefon, Zigarettenautomat |
+| WASD / ↑ ↓, Shift | laufen, rennen |
+| Maus / ← → | umsehen (ins Bild klicken fängt die Maus) |
+| E | Tisch, Kasse, Vitrine, Telefon, Zigarettenautomat (anschauen) |
+| Esc / P | Pause, Einstellungen (Maus, Grafik, Ton, Musik) |
 | Tab | Übersicht: Talismane, Sets, Tasche, Boni, Rate |
 | Linksklick / Rechtsklick | Jeton setzen / zurücknehmen |
 | 1–6, Mausrad | Jeton-Wert wählen |

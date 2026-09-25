@@ -83,6 +83,8 @@ export interface RunStats {
 
 export class Run {
   readonly rng: Rng;
+  /** Tape number: the seed that made this run. */
+  readonly seed: number;
   readonly kitId: string;
   readonly stage: number;
   phase: RunPhase = 'betting';
@@ -154,7 +156,8 @@ export class Run {
   private loanRunning = false;
 
   constructor(opts: RunOptions = {}) {
-    this.rng = new Rng(opts.seed ?? (Math.random() * 2 ** 32) >>> 0);
+    this.seed = opts.seed ?? (Math.random() * 2 ** 32) >>> 0;
+    this.rng = new Rng(this.seed);
     this.locked = opts.locked ?? new Set();
     const kit = START_KITS[opts.kit ?? 'klassisch'] ?? START_KITS.klassisch;
     this.kitId = kit.id;

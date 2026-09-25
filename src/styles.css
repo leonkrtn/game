@@ -276,3 +276,12 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 /* First-run hints: a caption strip like a subtitle on the tape. */
 #hint { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: min(620px, calc(100% - 700px)); min-width: 300px; text-align: center; font-size: 26px; background: rgba(0, 0, 0, 0.7); padding: 4px 14px; border-left: 4px solid var(--luck); text-transform: uppercase; }
 #hint kbd { font-size: 22px; }
+
+/* Multiplier heat. */
+#score .mult.hot { box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6), 0 0 18px rgba(255, 90, 60, 0.7); }
+#score .mult.fire { box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6), 0 0 28px rgba(255, 120, 30, 0.95); animation: heat 0.12s infinite alternate; }
+#score .mult.inferno { background: linear-gradient(0deg, #b3140a, #ff7a1a 60%, #ffd23a); color: #fff; box-shadow: 0 0 40px rgba(255, 150, 30, 1), 0 -10px 30px rgba(255, 60, 20, 0.9); animation: heat 0.08s infinite alternate; }
+#score .mult.inferno .num { font-size: 52px; }
+@keyframes heat { from { transform: translate(-1px, 1px) rotate(-0.6deg); } to { transform: translate(1px, -1px) rotate(0.6deg); } }
+.summary { display: flex; flex-direction: column; gap: 2px; font-size: 24px; text-align: center; max-width: 900px; margin: 8px auto; }
+.summary .tape { opacity: 0.6; font-size: 22px; letter-spacing: 0.1em; }

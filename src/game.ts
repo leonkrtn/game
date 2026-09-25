@@ -12,7 +12,7 @@ import {
   renderItemTip, renderOsd, renderScore, renderSlip, renderTableBar, setBanner, setHelp, setPrompt, toast, type ScoreState,
 } from './ui/hud';
 import {
-  automatView, collectionView, controlsView, gameOverView, kasseView, overviewView, phoneView, sharkView, startView, victoryView,
+  automatView, collectionView, controlsView, gameOverView, kasseView, overviewView, pauseView, phoneView, sharkView, startView, victoryView,
   vitrineView, wheelView,
 } from './ui/screens';
 import { ItemPreview } from './world/preview';
@@ -46,6 +46,45 @@ export class Game {
   private caughtTimer = 0;
   private ringTimer = 0;
   private overview = false;
+  private paused = false;
+
+  private openPause(): void {
+    this.paused = true;
+    this.releasePointer();
+    openModal(pauseView(this.profile, !sfx.muted, {
+      resume: () => this.closePause(),
+      controls: () => openModal(controlsView(() => this.openPause()), 'vcr', () => this.openPause()),
+      mouse: (d) => {
+        this.profile.mouse = Math.max(1, Math.min(10, this.profile.mouse + d));
+        this.world.sensitivity = this.profile.mouse / 5;
+    sfx.setMusic(this.profile.music);
+        saveProfile(this.profile);
+        return this.profile.mouse;
+      },
+      graphics: (q) => this.setGraphics(q),
+      toggleSound: () => {
+        sfx.muted = !sfx.muted;
+        return !sfx.muted;
+      },
+      toggleMusic: () => {
+        this.profile.music = !this.profile.music;
+        saveProfile(this.profile);
+        sfx.setMusic(this.profile.music);
+        return this.profile.music;
+      },
+      quit: () => {
+        this.paused = false;
+        this.run.surrender();
+        recordRun(this.profile, this.run, false);
+        this.rewind();
+      },
+    }), 'vcr', () => this.closePause());
+  }
+
+  private closePause(): void {
+    this.paused = false;
+    closeModal();
+  }
 
   // ---- First-run tutorial: one hint at a time, each cleared by doing it ----------------
 
@@ -102,6 +141,7 @@ export class Game {
     this.run = new Run({ locked: lockedIds(this.profile) });
     this.world.wheel.onTick = (s) => sfx.tick(s);
     this.world.onStep = () => sfx.step();
+    this.world.sensitivity = this.profile.mouse / 5;
 
     const canvas = this.world.renderer.domElement;
     canvas.addEventListener('mousemove', (e) => {
@@ -702,6 +742,11 @@ export class Game {
     $('itemtip').classList.add('hidden');
     this.world.wheel.spin(r.hop ? r.hop.from : r.pocket.index, 6.5, r.hop?.to);
     sfx.spin();
+    // A lot riding on this one: heartbeat and slow motion at the end.
+    const riding = r.stake + this.run.riskStake;
+    this.tension = this.run.highRisk || !!this.run.duel || riding >= 0.4 * (this.run.cash + riding) || riding >= this.run.debt * 0.5;
+    this.heartT = 0;
+    sfx.duckMusic(this.tension ? 0.9 : 0.5);
     floater('RIEN NE VA PLUS!', window.innerWidth / 2, window.innerHeight * 0.22, '#fff', 48);
     this.renderTable();
   }
@@ -821,7 +866,12 @@ export class Game {
     this.shownCash = this.run.cash;
   }
 
+  private tension = false;
+  private heartT = 0;
+
   private endSpin(): void {
+    this.tension = false;
+    sfx.duckMusic(0);
     this.world.clearChips();
     this.world.setDolly();
     setTimeout(() => {
@@ -924,6 +974,7 @@ export class Game {
     if (modalOpen()) {
       for (const k of presses) navModal(k);
       if (this.overview && (presses.includes('Escape') || presses.includes('Tab'))) this.toggleOverview();
+      else if (this.paused && (presses.includes('Escape') || presses.includes('KeyP'))) this.closePause();
       else if (presses.includes('Escape')) {
         if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'phone' || this.mode === 'smokes') this.closePanel();
         else if (this.mode === 'room' || this.mode === 'table') closeModal();
@@ -932,7 +983,10 @@ export class Game {
       if (this.mode !== 'start') this.world.movePlayer(dt, new THREE.Vector2(), false);
     } else {
       switch (this.mode) {
-        case 'room': this.frameRoom(dt, presses); break;
+        case 'room':
+          if (presses.includes('Escape') || presses.includes('KeyP')) this.openPause();
+          else this.frameRoom(dt, presses);
+          break;
         case 'table': this.frameTable(dt, presses); break;
         case 'spinning': this.frameSpinning(dt, presses); break;
         case 'caught': this.frameCaught(dt); break;
@@ -973,7 +1027,19 @@ export class Game {
       sfx.ring();
     }
 
-    const speed = this.mode === 'spinning' && this.input.isDown('Space') ? 2 : 1;
+    let speed = this.mode === 'spinning' && this.input.isDown('Space') ? 2 : 1;
+    if (this.tension && this.mode === 'spinning' && this.spinStage === 'rolling') {
+      const k = this.world.wheel.progress;
+      if (k > 0.55) {
+        this.heartT -= dt;
+        if (this.heartT <= 0) {
+          sfx.heartbeat();
+          this.heartT = 0.95 - k * 0.45;
+        }
+      }
+      // The last turns in slow motion, speed-up ignored.
+      if (k > 0.82) speed = 0.55;
+    }
     const ev = this.world.wheel.update(dt, speed);
     if (ev === 'landed') this.onFirstLanding();
     if (ev === 'done' && this.mode === 'spinning' && this.spinStage === 'rolling') this.onLanded();

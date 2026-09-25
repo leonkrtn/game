@@ -18,6 +18,9 @@ export interface Profile {
   quality: 'auto' | 'high' | 'medium' | 'low';
   /** Steps of the first-run tutorial already shown. */
   tutorial: number;
+  /** Mouse sensitivity step 1..10 (5 = default). */
+  mouse: number;
+  music: boolean;
 }
 
 export interface Achievement {
@@ -69,7 +72,7 @@ export const ACHIEVEMENTS: Achievement[] = [
 const KEY = 'rien-ne-va-plus/profile/v1';
 
 export function emptyProfile(): Profile {
-  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch', maxStage: 0, lastStage: 0, lastBall: 'stahl', quality: 'auto', tutorial: 0 };
+  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch', maxStage: 0, lastStage: 0, lastBall: 'stahl', quality: 'auto', tutorial: 0, mouse: 5, music: true };
 }
 
 export function loadProfile(): Profile {

@@ -125,7 +125,9 @@ export function renderScore(st?: ScoreState): void {
   }
   box.classList.remove('hidden');
   const sum = h('div', { class: 'box sum' }, h('span', { text: 'SUMME' }), h('span', { class: 'num', text: fmt(st.sum) }));
-  const mult = h('div', { class: 'box mult' }, h('span', { text: 'MULT' }), h('span', { class: 'num', text: `×${fmtMult(st.mult)}` }));
+  // The bigger the multiplier, the hotter the box: it glows, then shakes, then burns.
+  const heat = st.mult >= 12 ? ' inferno' : st.mult >= 6 ? ' fire' : st.mult >= 3 ? ' hot' : '';
+  const mult = h('div', { class: 'box mult' + heat }, h('span', { text: 'MULT' }), h('span', { class: 'num', text: `×${fmtMult(st.mult)}` }));
   sum.id = 'sumCell';
   mult.id = 'multCell';
   const ticker = h('div', { class: 'ticker' });

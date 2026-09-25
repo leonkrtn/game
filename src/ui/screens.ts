@@ -303,7 +303,10 @@ export function collectionView(profile: Profile, back: () => void): HTMLElement 
 
 export function controlsView(back: () => void): HTMLElement {
   const lines: [string, string][] = [
-    ['WASD / PFEILE', 'LAUFEN, SHIFT RENNT'],
+    ['MAUS', 'UMSEHEN (INS BILD KLICKEN), ODER ZIEHEN'],
+    ['WASD / ↑↓', 'LAUFEN, SHIFT RENNT'],
+    ['← →', 'DREHEN OHNE MAUS'],
+    ['ESC / P', 'PAUSE, EINSTELLUNGEN'],
     ['E', 'TISCH, KASSE, VITRINE, TELEFON, AUTOMAT'],
     ['TAB', 'ÜBERSICHT: TALISMANE, SETS, TASCHE, BONI'],
     ['LINKSKLICK', 'JETON SETZEN – AUCH AUF LINIEN UND ECKEN'],
@@ -324,12 +327,25 @@ export function controlsView(back: () => void): HTMLElement {
   );
 }
 
+/** The run in a few lines: build, best moment, tape number. For screenshots and streams. */
+function runSummary(run: Run): HTMLElement {
+  const build = run.items.length ? run.items.map((t) => itemName(t)).join(' · ') : 'KEINE TALISMANE';
+  const sets = SETS.filter((x) => x.items.every((d) => run.has(d))).map((x) => x.name);
+  return h('div', { class: 'summary' },
+    h('div', { html: `BUILD: <span class="luck-c">${build.toUpperCase()}</span>` }),
+    sets.length ? h('div', { html: `SETS: <span class="money-c">${sets.join(', ').toUpperCase()}</span>` }) : null,
+    h('div', { text: `GRÖSSTER GEWINN ${fmt(run.stats.bestWin)} · KUGEL ${BALLS[run.ball].name.toUpperCase()} · STUFE ${run.stage}` }),
+    h('div', { class: 'tape', text: `BAND-NR. ${run.seed.toString(36).toUpperCase().padStart(7, '0')}` }),
+  );
+}
+
 export function gameOverView(run: Run, rewind: () => void): HTMLElement {
   return h('div', { class: 'caught' },
     h('div', { style: 'font-size:34px', text: '■ STOP' }),
     h('h1', { text: 'ERWISCHT.' }),
     h('div', { style: 'font-size:28px', html: `DIE GELDEINTREIBER WOLLTEN ${fmt(run.debt)}. DU HATTEST ${fmt(run.cash + run.deposit)}.` }),
-    h('div', { style: 'font-size:24px;opacity:.85', html: `RATEN ${run.paidRates} · DREHS ${run.stats.spins} · BESTER GEWINN ${fmt(run.stats.bestWin)} · NACHHOPSER ${run.stats.hops} · DUELLE ${run.stats.duelWins}/${run.stats.duelWins + run.stats.duelLosses}` }),
+    h('div', { style: 'font-size:24px;opacity:.85', html: `RATEN ${run.paidRates} · DREHS ${run.stats.spins} · NACHHOPSER ${run.stats.hops} · DUELLE ${run.stats.duelWins}/${run.stats.duelWins + run.stats.duelLosses}` }),
+    runSummary(run),
     h('div', { class: 'rows' }, row('◀◀ ZURÜCKSPULEN', '', rewind)),
   );
 }
@@ -340,6 +356,7 @@ export function victoryView(run: Run, endless: () => void, restart: () => void):
     h('h1', { style: 'color:var(--money)', text: 'FREI.' }),
     h('div', { style: 'font-size:28px', text: `ALLE ${DEBTS.length} RATEN BEZAHLT. DIE HERREN NICKEN UND GEHEN.` }),
     h('div', { style: 'font-size:24px;opacity:.85', text: run.stage < 5 ? `SCHULDENSTUFE ${run.stage + 1} IST JETZT FREIGESCHALTET.` : 'DU HAST DIE HÖCHSTE SCHULDENSTUFE GESCHAFFT.' }),
+    runSummary(run),
     h('div', { class: 'rows' }, row('▶ WEITERSPIELEN (ENDLOS)', '', endless), row('◀◀ NEUES BAND', '', restart)),
   );
 }
@@ -450,5 +467,52 @@ export function sharkView(run: Run, take: () => void, decline: () => void): HTML
       row('ABLEHNEN', run.sharkDue ? 'DAS SPIEL IST VORBEI' : 'OHNE GELD WEITER', decline),
     ),
     h('div', { class: 'info', style: 'text-align:center', text: 'Der Kredithai kommt nur ein einziges Mal pro Spiel.' }),
+  );
+}
+
+// ---- Pause menu ----------------------------------------------------------------------------------
+
+export interface PauseHandlers {
+  resume(): void;
+  controls(): void;
+  mouse(step: number): number;
+  graphics(q: Profile['quality']): void;
+  toggleSound(): boolean;
+  toggleMusic(): boolean;
+  quit(): void;
+}
+
+export function pauseView(profile: Profile, soundOn: boolean, hd: PauseHandlers): HTMLElement {
+  const mouseValue = h('span', { class: 'v', text: `◀ ${profile.mouse} ▶` });
+  const stepMouse = (d: number) => (mouseValue.textContent = `◀ ${hd.mouse(d)} ▶`);
+  let gfx = profile.quality;
+  const gfxValue = h('span', { class: 'v', text: `◀ ${GRAPHICS_NAME[gfx]} ▶` });
+  const stepGfx = (d: number) => {
+    gfx = GRAPHICS[(GRAPHICS.indexOf(gfx) + d + GRAPHICS.length) % GRAPHICS.length];
+    gfxValue.textContent = `◀ ${GRAPHICS_NAME[gfx]} ▶`;
+    hd.graphics(gfx);
+  };
+  const sound = row('TON', soundOn ? 'AN' : 'AUS', () => ((sound.lastElementChild as HTMLElement).textContent = hd.toggleSound() ? 'AN' : 'AUS'));
+  const music = row('MUSIK', profile.music ? 'AN' : 'AUS', () => ((music.lastElementChild as HTMLElement).textContent = hd.toggleMusic() ? 'AN' : 'AUS'));
+  let armed = false;
+  const quit = row('<span class="rec-c">ZUM HAUPTMENÜ</span>', 'SPIEL AUFGEBEN', () => {
+    if (!armed) {
+      armed = true;
+      (quit.lastElementChild as HTMLElement).textContent = 'NOCHMAL = WIRKLICH';
+      return;
+    }
+    hd.quit();
+  });
+  return h('div', { class: 'menu', style: 'width:min(720px,100%)' },
+    h('div', { class: 'head' }, h('h2', { text: '❚❚ PAUSE' }), h('span', { text: 'ESC WEITER' })),
+    h('div', { class: 'rows' },
+      row('▶ WEITER', '', hd.resume),
+      row('MAUS-EMPFINDLICHKEIT', mouseValue, () => stepMouse(1), { onStep: stepMouse }),
+      row('GRAFIK', gfxValue, () => stepGfx(1), { onStep: stepGfx }),
+      sound,
+      music,
+      row('STEUERUNG', '', hd.controls),
+      quit,
+    ),
   );
 }
