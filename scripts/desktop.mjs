@@ -50,6 +50,27 @@ async function icns() {
 
 const icon = await icns();
 
+// Small installer (a few MB): the game plus a script that fetches Electron on the Mac itself and
+// signs the app there. For when the full app is too big to send around.
+{
+  const work = join(out, 'installer');
+  rmSync(work, { recursive: true, force: true });
+  const dir = join(work, 'Rien ne va plus', 'app');
+  mkdirSync(dir, { recursive: true });
+  for (const f of ['main.cjs', 'preload.cjs']) copyFileSync(join(root, 'desktop', f), join(dir, f));
+  copyFileSync(game, join(dir, 'game.html'));
+  writeFileSync(join(dir, 'icon.icns'), icon);
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'rien-ne-va-plus', productName: 'Rien ne va plus', version, main: 'main.cjs' }, null, 2));
+  const script = join(work, 'Rien ne va plus', 'Rien ne va plus installieren.command');
+  writeFileSync(script, readFileSync(join(root, 'desktop', 'install.command'), 'utf8').replace('__ELECTRON__', ELECTRON), { mode: 0o755 });
+  const target = join(out, 'Rien-ne-va-plus-Mac-Installer.zip');
+  rmSync(target, { force: true });
+  execFileSync('zip', ['-qry', target, 'Rien ne va plus'], { cwd: work });
+  rmSync(work, { recursive: true, force: true });
+  console.log(`built ${target}`);
+  if (process.env.INSTALLER_ONLY) process.exit(0);
+}
+
 const plistSet = (xml, key, value) => {
   const re = new RegExp(`(<key>${key}</key>\\s*<string>)[^<]*(</string>)`);
   return re.test(xml) ? xml.replace(re, `$1${value}$2`) : xml.replace('</dict>\n</plist>', `\t<key>${key}</key>\n\t<string>${value}</string>\n</dict>\n</plist>`);
