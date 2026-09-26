@@ -2,6 +2,7 @@ import {
   BALLS, CONSUMABLES, DEBTS, ITEMS, MAX_CONSUMABLES, NEWS, OFFERS, POCKET_ITEMS, RULES, SETS, SHARK_FACTOR,
   STAGES, START_KITS, type PocketToolId,
 } from '../game/content';
+import { desktop, isFullscreen } from '../fullscreen';
 import { ACHIEVEMENTS, nearestUnlocks, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
@@ -159,8 +160,7 @@ export interface StartHandlers {
 
 /** Menu row that switches fullscreen and shows its state. */
 function fullscreenRow(toggle: () => Promise<boolean>, onHover?: () => void): HTMLButtonElement {
-  const on = () => !!(document.fullscreenElement ?? (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement);
-  const b = row('VOLLBILD <kbd>F</kbd>', on() ? 'AN' : 'AUS', () => {
+  const b = row('VOLLBILD <kbd>F</kbd>', isFullscreen() ? 'AN' : 'AUS', () => {
     void toggle().then((v) => ((b.lastElementChild as HTMLElement).textContent = v ? 'AN' : 'AUS'));
   }, { onHover });
   return b;
@@ -236,8 +236,9 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
       row('SAMMLUNG', `${profile.done.length}/${ACHIEVEMENTS.length}`, hd.collection),
       row('STEUERUNG', '', hd.controls),
       graphics,
-      fullscreenRow(hd.fullscreen, () => (info.textContent = 'Vollbild mit F. In Chrome bleibt Esc im Spiel; in Safari nimm Q statt Esc – oder den grünen Fensterknopf (ctrl+cmd+F), den Esc nicht verlässt.')),
+      fullscreenRow(hd.fullscreen, () => (info.textContent = desktop ? 'Vollbild mit F. Esc bleibt im Spiel.' : 'Vollbild mit F. In Chrome bleibt Esc im Spiel; in Safari nimm Q statt Esc – oder lade die Mac-App.')),
       sound,
+      desktop ? row('<span class="rec-c">BEENDEN</span>', '⌘Q', () => desktop!.quit()) : null,
     ),
     info,
     h('div', { class: 'foot', html: `SPIELE ${profile.runs} · MEISTE RATEN ${profile.bestRates} · BESTER GEWINN ${fmt(profile.bestWin)} · FREI ${profile.wins}×` }),

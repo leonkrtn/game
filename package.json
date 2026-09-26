@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run tests",
     "typecheck": "tsc --noEmit",
-    "sim": "vitest run scripts/sim.test.ts"
+    "sim": "vitest run scripts/sim.test.ts",
+    "desktop": "npm run build:offline && node scripts/desktop.mjs"
   },
   "dependencies": {
     "three": "^0.186.0"

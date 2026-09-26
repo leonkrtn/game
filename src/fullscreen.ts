@@ -7,16 +7,28 @@
  * window-level fullscreen of macOS (green button, ctrl+cmd+F) is not left by Esc at all.
  */
 
+/** Bridge the desktop app (Electron) puts on window: fullscreen belongs to the app window there. */
+export interface DesktopBridge {
+  toggleFullscreen(): Promise<boolean>;
+  isFullscreen(): Promise<boolean>;
+  onFullscreen(cb: (on: boolean) => void): void;
+  quit(): void;
+}
+export const desktop = (window as unknown as { desktop?: DesktopBridge }).desktop;
+let desktopFull = true;
+desktop?.onFullscreen((on) => (desktopFull = on));
+desktop?.isFullscreen().then((on) => (desktopFull = on)).catch(() => undefined);
+
 type LockableNavigator = Navigator & { keyboard?: { lock?: (keys?: string[]) => Promise<void>; unlock?: () => void } };
 type WebkitDoc = Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => Promise<void> };
 type WebkitEl = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> };
 
 const doc = document as WebkitDoc;
 
-export const isFullscreen = () => !!(doc.fullscreenElement ?? doc.webkitFullscreenElement);
+export const isFullscreen = () => (desktop ? desktopFull : !!(doc.fullscreenElement ?? doc.webkitFullscreenElement));
 
 /** Whether Esc stays with the game while in fullscreen (Chromium browsers). */
-export const canLockEscape = () => typeof (navigator as LockableNavigator).keyboard?.lock === 'function';
+export const canLockEscape = () => !!desktop || typeof (navigator as LockableNavigator).keyboard?.lock === 'function';
 
 let leaving = false;
 
@@ -48,6 +60,8 @@ export async function exitFullscreen(): Promise<void> {
 }
 
 export async function toggleFullscreen(): Promise<boolean> {
+  // In the desktop app the window itself goes fullscreen, and Esc never leaves it.
+  if (desktop) return (desktopFull = await desktop.toggleFullscreen());
   if (isFullscreen()) {
     await exitFullscreen();
     return false;

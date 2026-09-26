@@ -48,8 +48,12 @@ export class Game {
   private overview = false;
   private paused = false;
 
+  /** When the pause menu opened: the Esc that opened it must not close it again. */
+  private pausedAt = 0;
+
   private openPause(): void {
     this.paused = true;
+    this.pausedAt = performance.now();
     this.releasePointer();
     openModal(pauseView(this.profile, !sfx.muted, {
       resume: () => this.closePause(),
@@ -136,9 +140,14 @@ export class Game {
     }
   }
 
+  private releasing = false;
+
   private releasePointer(): void {
     this.dragLook = false;
-    if (document.pointerLockElement) document.exitPointerLock();
+    if (document.pointerLockElement) {
+      this.releasing = true;
+      document.exitPointerLock();
+    }
   }
   private last = performance.now();
   /** Largest simulated step per frame; raised by automated tests on slow software renderers. */
@@ -188,6 +197,11 @@ export class Game {
       if (list[j]) this.selectChip(list[j]);
     }, { passive: true });
     window.addEventListener('keydown', () => sfx.unlock(), { once: true });
+    // Esc also frees the mouse without a key event reaching the page: treat losing it like Esc.
+    document.addEventListener('pointerlockchange', () => {
+      if (!document.pointerLockElement && !this.releasing && this.mode === 'room' && !modalOpen()) this.openPause();
+      this.releasing = false;
+    });
     // The browser dropped out of fullscreen by itself (Esc in Safari): pause like Esc would.
     watchFullscreen(() => {
       if (this.mode === 'room' && !modalOpen()) this.openPause();
@@ -1105,7 +1119,9 @@ export class Game {
     if (!modalOpen()) this.overview = false;
     if (modalOpen()) {
       for (const k of presses) navModal(k);
-      if (this.overview && (presses.includes('Escape') || presses.includes('Tab'))) this.toggleOverview();
+      if (this.paused && performance.now() - this.pausedAt < 300) {
+        // Same Esc that opened the pause (mouse release and key press can both arrive).
+      } else if (this.overview && (presses.includes('Escape') || presses.includes('Tab'))) this.toggleOverview();
       else if (this.paused && (presses.includes('Escape') || presses.includes('KeyP'))) this.closePause();
       else if (presses.includes('Escape')) {
         if (this.mode === 'vitrine') {

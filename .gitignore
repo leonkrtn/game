@@ -5,3 +5,5 @@ dist-single
 .DS_Store
 assets-src
 dist-offline
+desktop-dist
+.cache
