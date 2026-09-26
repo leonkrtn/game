@@ -321,3 +321,65 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 #shopbar .btns { font-size: 24px; }
 #shopbar .btns button { padding: 0 4px; }
 #shopbar .btns button:hover:not(:disabled) { background: var(--osd); color: #000; text-shadow: none; }
+
+/* Nudge timing bar. */
+#qte { position: absolute; left: 50%; bottom: 38%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; text-transform: uppercase; font-size: 26px; pointer-events: none; }
+#qte .bar { position: relative; width: 360px; height: 20px; background: rgba(0, 0, 0, 0.7); border: 2px solid #fff; }
+#qte .zone { position: absolute; top: 0; bottom: 0; left: calc(var(--center) - var(--zone) / 2); width: var(--zone); background: #2fbf5a; }
+#qte .mark { position: absolute; top: -6px; bottom: -6px; left: var(--pos); width: 4px; background: #ffd24a; box-shadow: 0 0 8px #ffd24a; }
+
+/* Special chips in the tray. */
+.specials { display: flex; gap: 6px; margin-left: 18px; padding-left: 18px; border-left: 2px solid rgba(255, 255, 255, 0.25); }
+.chipface.special { border-style: double; border-width: 7px; font-size: 20px; box-shadow: 0 0 12px var(--r), 0 5px 0 -1px rgba(0, 0, 0, 0.55); }
+.chipbtn.sp .k { font-size: 16px; max-width: 70px; overflow: hidden; white-space: nowrap; }
+.chipbtn.sp.on .chipface { transform: translateY(-6px); box-shadow: 0 0 18px var(--r); }
+#slip .susp { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+#slip .susp .meter i { background: linear-gradient(90deg, #d8b04a, #ff3030); }
+#slip .susp .meter.danger { animation: blink 0.8s steps(2) infinite; }
+#slip .boost.hot { color: #ffd24a; }
+
+/* The Baron's cards. */
+.draft { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: auto; margin-bottom: 5vh; width: min(1100px, 100%); text-transform: uppercase; }
+.draft .baron { color: var(--luck); font-size: 30px; text-align: center; text-transform: none; max-width: 900px; }
+.draft .sub { font-size: 22px; opacity: 0.8; }
+.cards { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; perspective: 900px; }
+.card { width: 230px; min-height: 330px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 14px 18px; background: linear-gradient(170deg, #22121a, #0a0508); border: 3px solid #c9a04a; border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), inset 0 0 0 5px #0a0508, inset 0 0 0 6px rgba(201, 160, 74, 0.5); color: #f4ead0; font-family: inherit; cursor: pointer; text-transform: uppercase; animation: dealCard 0.5s both; transition: transform 0.15s, box-shadow 0.15s; position: relative; }
+.card:hover, .card.sel { transform: translateY(-10px) rotate(-1deg); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(255, 210, 74, 0.5), inset 0 0 0 5px #0a0508, inset 0 0 0 6px rgba(201, 160, 74, 0.8); }
+.card .kind { font-size: 17px; letter-spacing: 0.1em; opacity: 0.8; }
+.card .art { width: 120px; height: 120px; display: grid; place-items: center; font-size: 64px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 210, 120, 0.25), transparent 70%); color: #ffd24a; text-shadow: 0 0 18px rgba(255, 180, 60, 0.8); }
+.card .chipart { width: 88px; height: 88px; border-radius: 50%; background: radial-gradient(circle, var(--c) 0 46%, var(--r) 47% 52%, var(--c) 53% 100%); border: 8px dashed var(--r); box-shadow: 0 0 20px var(--r); }
+.card .name { font-size: 28px; line-height: 1; text-align: center; }
+.card .desc { font-size: 19px; text-transform: none; text-align: center; opacity: 0.92; line-height: 1.15; }
+.card .key { position: absolute; top: 8px; right: 10px; font-size: 18px; opacity: 0.6; }
+.card.rar-rare { border-color: #7fb8ff; }
+.card.rar-legendary { border-color: #ff5ad0; animation: dealCard 0.5s both, legend 1.6s ease-in-out infinite alternate; }
+.card.k-baron { background: linear-gradient(170deg, #2a0a0a, #0a0303); }
+.card.k-rad .art { color: #ff7a2f; }
+.card.k-schummel .art { color: #9ad0ff; }
+@keyframes dealCard { from { opacity: 0; transform: translateY(80px) rotateY(90deg); } to { opacity: 1; transform: none; } }
+@keyframes legend { from { box-shadow: 0 10px 30px rgba(0,0,0,.7), 0 0 10px #ff5ad0; } to { box-shadow: 0 10px 30px rgba(0,0,0,.7), 0 0 28px #ff5ad0; } }
+
+/* Bonus wheel. */
+.bonuswheel { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: auto; text-transform: uppercase; cursor: pointer; }
+.bonuswheel .wheelwrap { position: relative; filter: drop-shadow(0 12px 30px rgba(0, 0, 0, 0.8)); }
+.bonuswheel .flapper { position: absolute; left: 50%; top: -14px; width: 0; height: 0; margin-left: -18px; border-left: 18px solid transparent; border-right: 18px solid transparent; border-top: 44px solid #f4ead0; transform-origin: 50% 0; filter: drop-shadow(0 3px 2px rgba(0,0,0,.7)); }
+.bonuswheel .flapper.flap { animation: flap 0.12s; }
+@keyframes flap { 50% { transform: rotate(14deg); } }
+.bonus-status { font-size: 40px; color: #ffd24a; text-shadow: 3px 3px 0 #000; text-align: center; max-width: 900px; }
+.bonus-status.won { animation: bump 0.3s; }
+.bonus-status.niete { color: #ccc; }
+.bonuswheel .hint { font-size: 22px; opacity: 0.8; }
+
+/* Let-it-ride ladder. */
+.ladder { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
+.ladder .rung { display: flex; justify-content: space-between; padding: 4px 12px; border: 2px solid rgba(255, 255, 255, 0.25); font-size: 24px; }
+.ladder .rung.done { background: rgba(47, 191, 90, 0.35); border-color: #2fbf5a; }
+.ladder .rung.next { border-color: #ffd24a; color: #ffd24a; animation: blink 1s steps(2) infinite; }
+
+/* Story captions. */
+.story { margin: auto; max-width: 900px; display: flex; flex-direction: column; gap: 18px; text-align: center; font-size: 30px; text-transform: uppercase; }
+.story p { margin: 0; opacity: 0; animation: typeIn 0.8s forwards; }
+.story .late { opacity: 0; animation: typeIn 0.6s forwards; }
+.story.inline { font-size: 22px; margin: 6px auto; gap: 6px; }
+.story.inline p { opacity: 1; animation: none; color: var(--luck); }
+@keyframes typeIn { from { opacity: 0; filter: blur(4px); transform: translateY(6px); } to { opacity: 1; filter: none; transform: none; } }

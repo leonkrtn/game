@@ -50,7 +50,8 @@ function nextStep(run: Run): string {
   if (run.phase === 'due') {
     return held >= run.debt ? `GEH ZUR KASSE UND ZAHL ${fmt(run.debt)} – SONST HOLEN SIE ES SICH.` : `DIR FEHLEN ${fmt(run.debt - held)}. GEH ZUR KASSE UND BETE.`;
   }
-  if (run.offers.length) return 'DAS ROTE TELEFON KLINGELT – DER BOSS HAT EIN ANGEBOT FÜR DICH.';
+  if (run.bossRate) return `DER BARON SPIELT GEGEN DICH: SCHLAG IHN BEI EINEM DREH, DANN SINKT DIE RATE UM 10 %.`;
+  if (run.suspicion >= 70) return `VERDACHT ${run.suspicion}: SPIEL EIN PAAR DREHS EHRLICH, SONST KOMMT DER SAALCHEF.`;
   const affordable = run.shop.map((s, i) => ({ s, i })).filter(({ i }) => run.canBuy(i));
   if (affordable.length) {
     const fit = affordable.find(({ s }) => s.kind === 'item' && fitReason(run, s.def));
@@ -80,7 +81,7 @@ export function renderGoal(run: Run | undefined, show: boolean): void {
   const held = run.deposit + run.cash;
   const share = Math.min(1, held / Math.max(1, run.debt));
   const streak = run.stats.winStreak;
-  const key = [held, run.debt, run.round, run.phase, run.marks, run.items.length, run.offers.length, streak, run.shop.map((s) => s.sold).join()].join('|');
+  const key = [held, run.debt, run.round, run.phase, run.marks, run.items.length, run.suspicion, streak, run.shop.map((s) => s.sold).join()].join('|');
   box.classList.remove('hidden');
   if (key === lastGoal) return;
   lastGoal = key;

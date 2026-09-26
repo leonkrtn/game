@@ -19,26 +19,43 @@ const smooth = (u: number) => u * u * (3 - 2 * u);
 interface SpinAnim {
   t: number;
   duration: number;
-  r0: number;
-  dr: number;
   b0: number;
   db: number;
   target: number;
   lastPocket: number;
+  /** Deflector hits: progress points where the ball knocks on a brass diamond. */
+  knocks: number[];
+  /** How wild the final rattle over the separators is. */
+  rattle: number;
+  knocked: number;
+  done: boolean;
+}
+
+/** One ball: the normal one, or the second of a double-ball spin. */
+interface Ball {
+  mesh: THREE.Mesh;
+  anim?: SpinAnim;
+  angle: number;
 }
 
 export class Wheel3D {
   readonly group = new THREE.Group();
   readonly rotor = new THREE.Group();
   readonly ball: THREE.Mesh;
+  /** The second ball of a double-ball spin. */
+  readonly ball2: THREE.Mesh;
+  private balls: Ball[];
   private canvas = document.createElement('canvas');
   private texture: THREE.CanvasTexture;
-  private anim?: SpinAnim;
-  private ballAngle = 0;
+  private rotorSpin?: { t: number; duration: number; r0: number; dr: number };
   private pendingHop?: number;
   private hop?: { t: number; from: number; delta: number };
   private idleSpeed = 0.15;
   onTick?: (strength: number) => void;
+  /** The ball knocks on a deflector (strength 0..1). */
+  onKnock?: (strength: number) => void;
+  /** How fast the ball rolls right now (0..1), for the rolling sound. */
+  roll = 0;
 
   constructor() {
     this.canvas.width = this.canvas.height = 2048;
@@ -118,24 +135,28 @@ export class Wheel3D {
       new THREE.MeshPhysicalMaterial({ color: 0xf6f0e2, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 }),
     );
     this.ball.visible = false;
+    this.ball2 = new THREE.Mesh(this.ball.geometry, new THREE.MeshPhysicalMaterial({ color: 0xffd24a, roughness: 0.15, metalness: 0.6, clearcoat: 1 }));
+    this.ball2.visible = false;
+    this.balls = [{ mesh: this.ball, angle: 0 }, { mesh: this.ball2, angle: 0 }];
 
-    for (const m of [pedestal, bowl, disc, cone, this.ball]) {
+    for (const m of [pedestal, bowl, disc, cone, this.ball, this.ball2]) {
       m.castShadow = true;
       m.receiveShadow = true;
     }
-    this.group.add(pedestal, bowl, trackRing, this.rotor, this.ball);
+    this.group.add(pedestal, bowl, trackRing, this.rotor, this.ball, this.ball2);
     // Separators, arms and deflectors are the same brass: merge them (the rotor turns as one piece).
     mergeStatic([this.rotor], [], this.rotor);
-    mergeStatic([this.group], [this.rotor, this.ball], this.group);
+    mergeStatic([this.group], [this.rotor, this.ball, this.ball2], this.group);
   }
 
   get spinning(): boolean {
-    return !!this.anim || !!this.hop;
+    return !!this.rotorSpin || !!this.hop;
   }
 
   /** 0..1 progress of the current spin (0 when idle). */
   get progress(): number {
-    return this.anim ? this.anim.t / this.anim.duration : 0;
+    const a = this.balls[0].anim;
+    return a ? a.t / a.duration : 0;
   }
 
   refresh(wheel: Pocket[], highlight?: number, marks?: number[]): void {
@@ -143,90 +164,168 @@ export class Wheel3D {
     this.texture.needsUpdate = true;
   }
 
-  /** Starts a spin that ends with the ball resting in `target`, optionally hopping on into `hopTo`. */
-  spin(target: number, duration = 6, hopTo?: number): void {
+  /**
+   * Starts a spin that ends with the ball resting in `target`, optionally hopping on into `hopTo`.
+   * With `second`, a second (golden) ball runs too and rests in that pocket a little later.
+   */
+  spin(target: number, duration = 6, hopTo?: number, second?: number): void {
     const r0 = this.rotor.rotation.y;
     const dr = TAU * (1.4 + Math.random() * 0.6);
-    const b0 = r0 + Math.random() * TAU;
-    // Ball runs the other way; pick the full-turn count so it travels 5–6 turns.
-    let db = pocketAngle(target) + r0 + dr - b0;
-    db = ((db % TAU) + TAU) % TAU - TAU * 6;
-    this.anim = { t: 0, duration, r0, dr, b0, db, target, lastPocket: -1 };
+    const total = duration + (second !== undefined ? 0.9 : 0);
+    this.rotorSpin = { t: 0, duration: total, r0, dr };
+    this.launch(this.balls[0], target, duration, r0, dr, total);
+    if (second !== undefined) this.launch(this.balls[1], second, duration + 0.9, r0, dr, total);
+    else this.balls[1].mesh.visible = false;
     this.pendingHop = hopTo;
-    this.ball.visible = true;
+  }
+
+  private launch(b: Ball, target: number, duration: number, r0: number, dr: number, total: number): void {
+    const b0 = r0 + Math.random() * TAU;
+    // Where the rotor will be when this ball stops.
+    const rEnd = r0 + dr * easeOutQuad(duration / total);
+    // Ball runs the other way; pick the full-turn count so it travels 5–6 turns.
+    let db = pocketAngle(target) + rEnd - b0;
+    db = ((db % TAU) + TAU) % TAU - TAU * 6;
+    const knocks = [0.5 + Math.random() * 0.06, 0.6 + Math.random() * 0.06];
+    if (Math.random() < 0.5) knocks.push(0.7 + Math.random() * 0.04);
+    b.anim = { t: 0, duration, b0, db, target, lastPocket: -1, knocks, rattle: 0.8 + Math.random() * 0.8, knocked: 0, done: false };
+    b.mesh.visible = true;
+  }
+
+  /** Makes the resting ball jump into another pocket (a nudge), as if luck did it. */
+  queueHop(to: number): void {
+    if (this.balls[0].anim && !this.balls[0].anim.done) this.pendingHop = to;
   }
 
   /**
-   * Advances the animation. Returns 'landed' when the ball first rests, 'hopped' when a lucky hop
-   * finished, and 'done' on the frame the ball is finally at rest.
+   * Advances the animation. Returns 'landed' when the first ball rests before a hop, and 'done'
+   * on the frame every ball is finally at rest.
    */
   update(dt: number, speedUp = 1): 'none' | 'landed' | 'done' {
     if (this.hop) return this.updateHop(dt * speedUp);
-    const a = this.anim;
-    if (!a) {
+    const rs = this.rotorSpin;
+    if (!rs) {
       this.rotor.rotation.y += this.idleSpeed * dt;
-      if (this.ball.visible) this.placeBall(0, POCKET_R, DISC_Y + 0.12, true);
+      this.roll = 0;
+      for (const b of this.balls) if (b.mesh.visible) this.placeResting(b);
       return 'none';
     }
-    a.t = Math.min(a.duration, a.t + dt * speedUp);
-    const u = a.t / a.duration;
-    this.rotor.rotation.y = a.r0 + a.dr * easeOutQuad(u);
-    const world = a.b0 + a.db * easeOutCubic(u);
-
-    let r = TRACK_R, y = TRACK_Y;
-    if (u > 0.55) {
-      const s = smooth(Math.min(1, (u - 0.55) / 0.27));
-      r = TRACK_R + (POCKET_R - TRACK_R) * s;
-      y = TRACK_Y + (DISC_Y + 0.12 - TRACK_Y) * s + Math.abs(Math.sin(s * Math.PI * 3.5)) * 0.35 * (1 - s);
-      const rel = world - this.rotor.rotation.y;
-      const pocket = Math.round(-rel / STEP);
-      if (pocket !== a.lastPocket && s > 0.6) {
-        if (a.lastPocket !== -1) this.onTick?.(1 - u);
-        a.lastPocket = pocket;
+    rs.t = Math.min(rs.duration, rs.t + dt * speedUp);
+    this.rotor.rotation.y = rs.r0 + rs.dr * easeOutQuad(rs.t / rs.duration);
+    let ev: 'none' | 'landed' | 'done' = 'none';
+    let roll = 0;
+    for (const [i, b] of this.balls.entries()) {
+      const a = b.anim;
+      if (!a) continue;
+      if (a.done) {
+        this.placeResting(b);
+        continue;
+      }
+      a.t = Math.min(a.duration, a.t + dt * speedUp);
+      const u = a.t / a.duration;
+      roll = Math.max(roll, u < 0.55 ? 1 - u * 0.6 : Math.max(0, 0.7 - (u - 0.55) * 1.8));
+      this.moveBall(b, a, u);
+      if (a.t >= a.duration) {
+        a.done = true;
+        b.angle = pocketAngle(a.target);
+        this.onTick?.(0.9);
+        if (i === 0 && this.pendingHop !== undefined) {
+          const from = pocketAngle(a.target);
+          let delta = pocketAngle(this.pendingHop) - from;
+          delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+          this.hop = { t: -0.55, from, delta };
+          this.pendingHop = undefined;
+          ev = 'landed';
+        }
       }
     }
-    this.placeBall(world, r, y, false);
-
-    if (a.t >= a.duration) {
-      this.ballAngle = pocketAngle(a.target);
-      this.anim = undefined;
-      if (this.pendingHop !== undefined) {
-        const from = pocketAngle(a.target);
-        let delta = pocketAngle(this.pendingHop) - from;
-        delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-        this.hop = { t: -0.55, from, delta };
-        this.pendingHop = undefined;
-        return 'landed';
-      }
+    this.roll = roll;
+    if (ev === 'landed') return ev;
+    if (this.balls.every((b) => !b.anim || b.anim.done) && !this.hop) {
+      this.rotorSpin = undefined;
+      for (const b of this.balls) b.anim = undefined;
       return 'done';
     }
     return 'none';
+  }
+
+  /**
+   * The ball's path: fast on the track, knocked by the diamonds as it drops, then rattling over
+   * the separators before it settles in its pocket.
+   */
+  private moveBall(b: Ball, a: SpinAnim, u: number): void {
+    let world = a.b0 + a.db * easeOutCubic(u);
+    let r = TRACK_R + Math.sin(u * 40) * 0.02 * (1 - u);
+    let y = TRACK_Y;
+    if (u > 0.5) {
+      const s = smooth(Math.min(1, (u - 0.5) / 0.3));
+      r = TRACK_R + (POCKET_R - TRACK_R) * s;
+      y = TRACK_Y + (DISC_Y + 0.12 - TRACK_Y) * s;
+      // Knocks on the diamonds: a short, sharp jump outwards and up.
+      for (let k = 0; k < a.knocks.length; k++) {
+        const d = u - a.knocks[k];
+        if (d > 0 && d < 0.035) {
+          const j = Math.sin((d / 0.035) * Math.PI);
+          y += j * (0.5 - k * 0.12);
+          r += j * 0.25;
+        }
+        if (d > 0 && a.knocked === k) {
+          a.knocked++;
+          this.onKnock?.(1 - k * 0.25);
+        }
+      }
+      // Rattle: the ball bounces back and forth over a few separators, dying out.
+      if (u > 0.8) {
+        const q = (u - 0.8) / 0.2;
+        const env = Math.pow(1 - q, 2);
+        world += STEP * a.rattle * env * Math.sin(q * Math.PI * 4.5);
+        y += Math.abs(Math.sin(q * Math.PI * 9)) * 0.22 * env;
+      }
+      const rel = world - this.rotor.rotation.y;
+      const pocket = Math.round(-rel / STEP);
+      if (pocket !== a.lastPocket && s > 0.6) {
+        if (a.lastPocket !== -1) this.onTick?.(1 - u * 0.8);
+        a.lastPocket = pocket;
+      }
+    }
+    b.mesh.position.set(Math.cos(world) * r, y + BALL_R * 0.4, -Math.sin(world) * r);
   }
 
   /** The ball sits for a moment, then jumps over the separator into the lucky pocket. */
   private updateHop(dt: number): 'none' | 'done' {
     const h = this.hop!;
-    this.rotor.rotation.y += this.idleSpeed * dt;
+    const rs = this.rotorSpin;
+    if (rs) {
+      rs.t = Math.min(rs.duration, rs.t + dt);
+      this.rotor.rotation.y = rs.r0 + rs.dr * easeOutQuad(rs.t / rs.duration);
+    } else this.rotor.rotation.y += this.idleSpeed * dt;
     h.t += dt;
     const u = Math.max(0, Math.min(1, h.t / 0.5));
     const lift = Math.sin(u * Math.PI) * 0.9;
-    this.ballAngle = h.from + h.delta * smooth(u);
-    const world = this.rotor.rotation.y + this.ballAngle;
-    this.ball.position.set(Math.cos(world) * (POCKET_R + lift * 0.3), DISC_Y + 0.12 + lift + BALL_R * 0.4, -Math.sin(world) * (POCKET_R + lift * 0.3));
+    const b = this.balls[0];
+    b.angle = h.from + h.delta * smooth(u);
+    const world = this.rotor.rotation.y + b.angle;
+    b.mesh.position.set(Math.cos(world) * (POCKET_R + lift * 0.3), DISC_Y + 0.12 + lift + BALL_R * 0.4, -Math.sin(world) * (POCKET_R + lift * 0.3));
+    if (this.balls[1].mesh.visible && this.balls[1].anim?.done !== false) this.placeResting(this.balls[1]);
     if (h.t >= 0.5) {
       this.hop = undefined;
       this.onTick?.(1);
+      // The second ball may still be rolling: let the normal update finish it.
+      if (this.balls[1].anim && !this.balls[1].anim.done) return 'none';
+      this.rotorSpin = undefined;
+      for (const x of this.balls) x.anim = undefined;
       return 'done';
     }
     return 'none';
   }
 
-  private placeBall(angle: number, r: number, y: number, attached: boolean): void {
-    const world = attached ? this.rotor.rotation.y + this.ballAngle : angle;
-    this.ball.position.set(Math.cos(world) * r, y + BALL_R * 0.4, -Math.sin(world) * r);
+  private placeResting(b: Ball): void {
+    const world = this.rotor.rotation.y + b.angle;
+    b.mesh.position.set(Math.cos(world) * POCKET_R, DISC_Y + 0.12 + BALL_R * 0.4, -Math.sin(world) * POCKET_R);
   }
 
   hideBall(): void {
     this.ball.visible = false;
+    this.ball2.visible = false;
   }
 }

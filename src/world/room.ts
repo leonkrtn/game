@@ -1,16 +1,13 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import { BAR, DOOR, JUKEBOX, KASSE, LOUNGE, PHONE, ROOM, SMOKES, TABLE, TV, VITRINE } from './layout';
+import { DOOR, JUKEBOX, KASSE, LOUNGE, ROOM, SMOKES, TABLE, TV, VITRINE } from './layout';
 import { carpet, ceiling, damask, marble, smudges, wood, woodBump } from './materials';
 
 /** Handles to the parts of the room that animate or that the game talks to. */
 export interface Casino {
   update(dt: number, t: number): void;
   showcase: THREE.Group;
-  phoneHandset: THREE.Group;
-  phoneLamp: THREE.MeshStandardMaterial;
-  phoneLight: THREE.PointLight;
   /** Shows a headline in the late-night news on the TV. */
   setNews(headline: string): void;
   /** Where background guests stand, at the bar. */
@@ -211,7 +208,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   };
   lamp(KASSE.x, KASSE.z + 0.8, 15);
   lamp(LOUNGE.x + 0.4, LOUNGE.z + 0.2, 11);
-  lamp(BAR.x - 0.9, BAR.z, 11);
+  lamp(ROOM.x1 - 1.4, 1.4, 10);
   lamp(VITRINE.x, VITRINE.z - 1.0, 13, 0xffd0a0);
   lamp(DOOR.x + 0.6, ROOM.z0 + 1.6, 10, 0xffb070);
 
@@ -280,12 +277,6 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   const kasseSign = neon('KASSE', '#ffb000', 1.3, 0.36, '700 220px Georgia, serif');
   kasseSign.position.set(KASSE.x, 2.5, KASSE.z + KASSE.halfD - 0.02);
   scene.add(kasseSign);
-  const barSign = neon('BAR', '#27e3ff', 0.9, 0.36, '700 260px Arial Narrow, Arial, sans-serif');
-  barSign.position.set(ROOM.x1 - 0.04, 2.35, BAR.z);
-  barSign.rotation.y = -Math.PI / 2;
-  const barLight = new THREE.PointLight(0x27e3ff, 3, 4, 2);
-  barLight.position.set(ROOM.x1 - 0.8, 2.1, BAR.z);
-  scene.add(barSign, barLight);
   let flickerT = 0;
   updates.push((dt, t) => {
     // The big sign buzzes and sometimes drops out for a moment.
@@ -353,100 +344,8 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     scene.add(g);
   }
 
-  // ---- Phone with a flickering fluorescent tube -------------------------------------
-  const phoneHandset = new THREE.Group();
-  const phoneLamp = std({ color: 0x400000, emissive: 0xff2020, emissiveIntensity: 0 });
-  const phoneLight = new THREE.PointLight(0xff2020, 0, 2.5, 2);
-  {
-    const g = new THREE.Group();
-    g.position.set(PHONE.x, PHONE.y, PHONE.z);
-    g.rotation.y = -Math.PI / 2;
-    g.add(mesh(new RoundedBoxGeometry(0.42, 0.52, 0.03, 2, 0.01), darkWood, 0, 0, 0));
-    const red = phys({ color: 0x9a0a14, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.1 });
-    g.add(mesh(new RoundedBoxGeometry(0.22, 0.26, 0.11, 3, 0.03), red, 0, -0.02, 0.07));
-    const dial = mesh(new THREE.CylinderGeometry(0.065, 0.065, 0.012, 32), std({ color: 0xf0e8d8, roughness: 0.4 }), 0, -0.05, 0.127);
-    dial.rotation.x = Math.PI / 2;
-    g.add(dial);
-    const hand = mesh(new THREE.CapsuleGeometry(0.024, 0.17, 6, 12), red, 0, 0, 0);
-    hand.rotation.z = Math.PI / 2;
-    phoneHandset.add(hand);
-    for (const x of [-0.095, 0.095]) phoneHandset.add(mesh(new THREE.CylinderGeometry(0.032, 0.032, 0.032, 16), red, x, -0.014, 0));
-    phoneHandset.position.set(0, 0.11, 0.135);
-    g.add(phoneHandset, mesh(new THREE.SphereGeometry(0.028, 12, 10), phoneLamp, 0.15, 0.2, 0.03));
-    // Coiled cord.
-    const pts: THREE.Vector3[] = [];
-    for (let i = 0; i <= 60; i++) {
-      const a = i * 0.9;
-      pts.push(new THREE.Vector3(-0.1 + Math.cos(a) * 0.012, 0.08 - i * 0.006, 0.12 + Math.sin(a) * 0.012));
-    }
-    g.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 200, 0.003, 5), red, 0, 0, 0, false));
-    g.scale.setScalar(1.4);
-    const tube = mesh(new THREE.CylinderGeometry(0.018, 0.018, 1.0, 10), std({ color: 0xffffff, emissive: 0xe8fff0, emissiveIntensity: 2 }), 0, 0.72, 0.02, false);
-    tube.rotation.z = Math.PI / 2;
-    g.add(tube);
-    const tubeLight = new THREE.PointLight(0xdfffe8, 2.5, 3.5, 2);
-    tubeLight.position.set(PHONE.x - 0.3, PHONE.y + 1.0, PHONE.z);
-    scene.add(g, phoneLight, tubeLight);
-    phoneLight.position.set(PHONE.x - 0.3, PHONE.y + 0.2, PHONE.z);
-    const tubeMat = tube.material as THREE.MeshStandardMaterial;
-    let buzz = 0;
-    updates.push((dt) => {
-      buzz -= dt;
-      if (buzz < -0.3) buzz = 1 + Math.random() * 4;
-      const on = buzz > 0 || Math.random() > 0.6;
-      tubeLight.intensity = on ? 2.5 : 0.1;
-      tubeMat.emissiveIntensity = on ? 2 : 0.1;
-    });
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.2), new THREE.MeshBasicMaterial({ map: textTexture('TELEFON', 512, 128, '700 84px Georgia, serif', '#ffffff', '#ff3030'), transparent: true, toneMapped: false }));
-    sign.rotation.y = -Math.PI / 2;
-    sign.position.set(PHONE.x - 0.02, PHONE.y + 0.62, PHONE.z);
-    scene.add(sign);
-  }
-
-  // Regulars leaning on the bar.
-  const guestSpots: Casino['guestSpots'] = [
-    { x: BAR.x - 1.15, z: BAR.z - 0.6, heading: Math.PI / 2 },
-    { x: BAR.x - 1.15, z: BAR.z + 0.5, heading: Math.PI / 2 },
-  ];
-
-  // ---- Bar corner ------------------------------------------------------------------
-  {
-    const g = new THREE.Group();
-    g.position.set(BAR.x, 0, BAR.z);
-    g.add(mesh(new RoundedBoxGeometry(0.7, 1.05, 2.2, 3, 0.03), panelMat, 0, 0.525, 0));
-    g.add(mesh(new RoundedBoxGeometry(0.85, 0.06, 2.35, 2, 0.02), lacquer, 0, 1.08, 0));
-    const shelf = mesh(new THREE.BoxGeometry(0.3, 0.03, 2.0), darkWood, 0.78, 1.55, 0);
-    g.add(shelf);
-    const bottleColors = [0x3a6a2a, 0x8a3a1a, 0xc9a13a, 0x2a4a7a, 0x6a1a2a, 0xd8d0b0];
-    for (let i = 0; i < 12; i++) {
-      const glassMat = phys({ color: bottleColors[i % 6], transparent: true, opacity: 0.75, roughness: 0.05, clearcoat: 1 });
-      const b = new THREE.Group();
-      b.add(mesh(new THREE.CylinderGeometry(0.04, 0.042, 0.22, 16), glassMat, 0, 0.11, 0));
-      b.add(mesh(new THREE.CylinderGeometry(0.014, 0.03, 0.08, 12), glassMat, 0, 0.26, 0));
-      b.add(mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.02, 10), brass, 0, 0.31, 0));
-      b.position.set(0.78, 1.565, -0.9 + i * 0.16);
-      g.add(b);
-    }
-    for (const z of [-0.6, 0.3]) {
-      const stool = new THREE.Group();
-      stool.add(mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.08, 20), velvet, 0, 0.78, 0));
-      stool.add(mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.75, 10), chrome, 0, 0.38, 0));
-      stool.add(mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.03, 20), chrome, 0, 0.015, 0));
-      stool.add(mesh(new THREE.TorusGeometry(0.15, 0.01, 6, 20), chrome, 0, 0.3, 0).rotateX(Math.PI / 2));
-      stool.position.set(-0.75, 0, z);
-      g.add(stool);
-    }
-    const glass = mesh(new THREE.CylinderGeometry(0.035, 0.03, 0.09, 16), phys({ color: 0xffffff, transparent: true, opacity: 0.3, roughness: 0 }), -0.2, 1.155, 0.2);
-    const whisky = mesh(new THREE.CylinderGeometry(0.032, 0.028, 0.04, 16), phys({ color: 0xb06010, transparent: true, opacity: 0.8, roughness: 0 }), -0.2, 1.135, 0.2, false);
-    g.add(glass, whisky);
-    if (candle) {
-      const c = candle.scene.clone(true);
-      c.scale.setScalar(0.8);
-      c.position.set(-0.1, 1.11, -0.5);
-      g.add(c);
-    }
-    scene.add(g);
-  }
+  // Guests would stand at the bar; the bar is gone, so the room stays quiet.
+  const guestSpots: Casino['guestSpots'] = [];
 
   // ---- Lounge: velvet chairs, jukebox and a CRT on a trolley ----------------------------
   if (chair) {
@@ -470,6 +369,12 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     side.add(mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.03, 24), lacquer, 0, 0.58, 0));
     side.add(mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.56, 10), brass, 0, 0.28, 0));
     side.add(mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.02, 20), phys({ color: 0x9ab8c8, transparent: true, opacity: 0.6, roughness: 0.1 }), 0.08, 0.605, 0));
+    if (candle) {
+      const c = candle.scene.clone(true);
+      c.scale.setScalar(0.8);
+      c.position.set(-0.1, 0.6, 0.05);
+      side.add(c);
+    }
     scene.add(side);
     smoke(scene, updates, new THREE.Vector3(LOUNGE.x + 0.13, 0.64, LOUNGE.z + 0.85));
   }
@@ -667,7 +572,8 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   };
   poster(ROOM.x0 + 0.03, -1.0, Math.PI / 2, 'Big Band', 'JEDEN FREITAG · 22 UHR', 330);
   poster(ROOM.x0 + 0.03, 0.9, Math.PI / 2, 'Jackpot', 'AB 1.000.000 LIRE', 200);
-  poster(ROOM.x1 - 0.03, -1.35, -Math.PI / 2, 'Casino', 'SEIT 1961', 20);
+  poster(ROOM.x1 - 0.03, -1.0, -Math.PI / 2, 'Casino', 'SEIT 1961', 20);
+  poster(ROOM.x1 - 0.03, 2.2, -Math.PI / 2, 'Tanzabend', 'SAMSTAGS AB 21 UHR', 300);
   poster(VITRINE.x - 2.2, ROOM.z1 - 0.03, Math.PI, 'Monte Carlo', 'GRAND PRIX 1987', 45);
   poster(VITRINE.x + 2.2, ROOM.z1 - 0.03, Math.PI, 'Roulette', 'FAITES VOS JEUX', 280);
 
@@ -680,9 +586,6 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
       newsText = headline;
     },
     showcase,
-    phoneHandset,
-    phoneLamp,
-    phoneLight,
     guestSpots,
     occluders,
   };

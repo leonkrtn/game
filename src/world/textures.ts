@@ -157,6 +157,8 @@ export function drawWheelTexture(c: HTMLCanvasElement, wheel: Pocket[], highligh
       const info = POCKET_MOD_INFO[p.mod];
       seg(WHEEL_RADII.pocketsIn, WHEEL_RADII.pocketsIn + 0.22, a, info.color);
       seg(WHEEL_RADII.disc - 0.2, WHEEL_RADII.disc - 0.05, a, info.color);
+      // Higher levels: a thicker inner band.
+      if ((p.lvl ?? 1) > 1) seg(WHEEL_RADII.pocketsIn + 0.22, WHEEL_RADII.pocketsIn + 0.22 + 0.14 * ((p.lvl ?? 1) - 1), a, shade(info.color, -0.35));
     }
     if (marks.includes(p.index)) {
       g.globalAlpha = 0.55;

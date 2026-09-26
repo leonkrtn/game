@@ -13,7 +13,7 @@ import type { ItemInstance, Pocket, ShopItem } from '../game/types';
 import { Human, loadHumanAssets, loadModel, type HumanAssets, type HumanStyle } from './humans';
 import { buildFigurine, buildUpgradeBox, goldify, registerModelFigurine, type Figurine } from './items3d';
 import {
-  DOOR, FIELD_RECTS, fieldAt, fieldCenter, itemSlot, KASSE, KASSE_SPOT, LAYOUT_BOUNDS, OBSTACLES, PHONE, PHONE_SPOT, RIVAL_SPOT, ROOM,
+  DOOR, FIELD_RECTS, fieldAt, fieldCenter, itemSlot, KASSE, KASSE_SPOT, LAYOUT_BOUNDS, OBSTACLES, RIVAL_SPOT, ROOM,
   SMOKES, SMOKES_SPOT, TABLE, TABLE_LAYOUT, TABLE_SPOT, TABLE_WHEEL, VITRINE, VITRINE_SPOT,
 } from './layout';
 import { feltNormal, leather, smudges, wood } from './materials';
@@ -38,7 +38,7 @@ interface Tween {
   done?: () => void;
 }
 
-export type CameraMode = 'menu' | 'room' | 'table' | 'wheel' | 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'shark' | 'caught';
+export type CameraMode = 'menu' | 'room' | 'table' | 'wheel' | 'kasse' | 'vitrine' | 'smokes' | 'shark' | 'caught';
 
 interface PlacedItem {
   uid: number;
@@ -67,6 +67,8 @@ export class World {
   private rival!: Human;
   private rivalChips: THREE.Mesh[] = [];
   private rivalState: 'away' | 'coming' | 'here' | 'leaving' = 'away';
+  private regular!: Human;
+  private baron!: Human;
   private shark!: Human;
   private sharkState: 'away' | 'coming' | 'here' | 'leaving' = 'away';
   private people: Human[] = [];
@@ -114,8 +116,12 @@ export class World {
   hoverField?: string;
   hoverCells = new Set<string>();
   markCells = new Set<string>();
+  private tmpBall = new THREE.Vector3();
+  private tmpBall2 = new THREE.Vector3();
+  /** Field the Baron blocks: glows red. */
+  blockedField?: string;
+  private specialMeshes: THREE.Mesh[] = [];
   pulseFields = new Set<string>();
-  phoneRinging = false;
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -180,7 +186,7 @@ export class World {
     this.casino = buildCasino(this.scene, base, chair, candle);
     // Fewer draw calls: glue the room's fixed furniture together, keeping everything that moves.
     const roomRoots = this.scene.children.filter((o) => !before.has(o));
-    mergeStatic(roomRoots, [this.casino.showcase, this.casino.phoneHandset, ...this.casino.occluders]);
+    mergeStatic(roomRoots, [this.casino.showcase, ...this.casino.occluders]);
     this.buildTable(base);
     this.buildMarquee();
     this.buildPeople();
@@ -295,8 +301,11 @@ export class World {
       t.group.visible = false;
       this.thugs.push(t);
     }
-    this.rival = this.human({ kind: 'man', top: 0x3a1a4a, bottom: 0x1a1020, hat: false, beard: true, scale: 0.98 });
+    this.regular = this.rival = this.human({ kind: 'man', top: 0x3a1a4a, bottom: 0x1a1020, hat: false, beard: true, scale: 0.98 });
     this.rival.group.visible = false;
+    // The Baron: cream suit, hat, dark glasses – he comes for the last rate.
+    this.baron = this.human({ kind: 'man', top: 0xd8ccb0, bottom: 0xd8ccb0, shoes: 0x2a1a10, hat: true, sunglasses: true, beard: true, scale: 1.02, bulk: 1.08 });
+    this.baron.group.visible = false;
     this.shark = this.human({ kind: 'man', top: 0xe8e2d6, bottom: 0xe8e2d6, shoes: 0xf0ece4, hat: true, sunglasses: true, beard: false, scale: 1.04, bulk: 1.12 });
     this.shark.group.visible = false;
     const tints = [0x4a4238, 0x2e2a44];
@@ -523,14 +532,13 @@ export class World {
   }
 
   /** What the player is looking at and close enough to use. */
-  focus(): 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'table' | undefined {
+  focus(): 'kasse' | 'vitrine' | 'smokes' | 'table' | undefined {
     const p = this.player.group.position;
     const f = this.forward(this.tmpWorld);
     const t = TABLE;
-    const targets: { id: 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'table'; x: number; z: number; reach: number }[] = [
+    const targets: { id: 'kasse' | 'vitrine' | 'smokes' | 'table'; x: number; z: number; reach: number }[] = [
       { id: 'kasse', x: KASSE.x, z: KASSE.z + KASSE.halfD, reach: 1.9 },
       { id: 'vitrine', x: THREE.MathUtils.clamp(p.x, VITRINE.x - VITRINE.halfD, VITRINE.x + VITRINE.halfD), z: VITRINE.z - VITRINE.halfW, reach: 1.6 },
-      { id: 'phone', x: PHONE.x, z: PHONE.z, reach: 1.6 },
       { id: 'smokes', x: SMOKES.x, z: SMOKES.z + SMOKES.halfW, reach: 1.6 },
       // The table's nearest edge point, so it can be used from its whole long side.
       { id: 'table', x: THREE.MathUtils.clamp(p.x, t.x - t.halfW + 0.3, t.x + t.halfW), z: THREE.MathUtils.clamp(p.z, t.z - t.halfD, t.z + t.halfD), reach: 1.25 },
@@ -608,10 +616,6 @@ export class World {
     return this.distTo(VITRINE_SPOT) < 1.1;
   }
 
-  nearPhone(): boolean {
-    return this.distTo(PHONE_SPOT) < 1.1;
-  }
-
   /** Puts the player a few steps into the room, looking at the table. */
   resetPlayer(): void {
     this.player.group.position.set(TABLE.x - 1.3, 0, TABLE.z + 1.45);
@@ -640,8 +644,8 @@ export class World {
     this.velocity.set(0, 0, 0);
   }
 
-  standAt(where: 'kasse' | 'vitrine' | 'phone' | 'smokes'): void {
-    const spot = where === 'kasse' ? KASSE_SPOT : where === 'vitrine' ? VITRINE_SPOT : where === 'smokes' ? SMOKES_SPOT : PHONE_SPOT;
+  standAt(where: 'kasse' | 'vitrine' | 'smokes'): void {
+    const spot = where === 'kasse' ? KASSE_SPOT : where === 'vitrine' ? VITRINE_SPOT : SMOKES_SPOT;
     this.player.group.position.set(spot.x, 0, spot.z);
     this.player.group.visible = false;
     this.velocity.set(0, 0, 0);
@@ -760,6 +764,34 @@ export class World {
     }
   }
 
+  /** Special chips on top of their fields' stacks: thicker, glowing at the rim. */
+  setSpecials(list: { uid: number; def: string; fieldId: string }[], defs: Record<string, { face: string; rim: string }>): void {
+    for (const m of this.specialMeshes) this.layout.remove(m);
+    this.specialMeshes = [];
+    const byField = new Map<string, number>();
+    for (const c of list) {
+      const d = defs[c.def];
+      const k = byField.get(c.fieldId) ?? 0;
+      byField.set(c.fieldId, k + 1);
+      const side = new THREE.MeshPhysicalMaterial({ color: d.face, roughness: 0.25, clearcoat: 1, emissive: new THREE.Color(d.rim), emissiveIntensity: 0.35 });
+      const face = new THREE.MeshPhysicalMaterial({ color: d.face, roughness: 0.2, clearcoat: 1, metalness: c.def === 'gold' ? 0.9 : 0, transparent: c.def === 'glas', opacity: c.def === 'glas' ? 0.7 : 1 });
+      const m = new THREE.Mesh(this.chipGeo, [side, face, face]);
+      m.scale.set(1.12, 1.6, 1.12);
+      const n = this.stacks.get(c.fieldId)?.length ?? 0;
+      const base = this.stackPos(c.fieldId, n);
+      m.position.set(base.x + k * 0.004, base.y + CHIP_H * 0.3 + k * CHIP_H * 1.6, base.z);
+      m.castShadow = true;
+      this.layout.add(m);
+      this.specialMeshes.push(m);
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(CHIP_R * 1.15, 0.0016, 6, 32), new THREE.MeshBasicMaterial({ color: d.rim, toneMapped: false }));
+      ring.rotation.x = Math.PI / 2;
+      ring.position.copy(m.position);
+      ring.position.y += CHIP_H * 0.9;
+      this.layout.add(ring);
+      this.specialMeshes.push(ring);
+    }
+  }
+
   dimLosers(fieldIds: string[]): void {
     for (const fid of fieldIds) {
       for (const mesh of this.stacks.get(fid) ?? []) {
@@ -814,7 +846,8 @@ export class World {
 
   /** The croupier sweeps the table: all chips slide off towards the wheel. */
   clearChips(): void {
-    const meshes = [...this.stacks.values()].flat();
+    const meshes = [...this.stacks.values()].flat().concat(this.specialMeshes);
+    this.specialMeshes = [];
     this.stacks.clear();
     for (const mesh of meshes) {
       const from = mesh.position.clone();
@@ -1007,12 +1040,18 @@ export class World {
   // ---- Rival, loan shark and the ball ------------------------------------------------
 
   /** A regular walks up to the table's end and puts his chips on `fieldId`; undefined sends him away. */
-  setRival(duel?: { fieldId: string; stake: number }): void {
+  setRival(duel?: { fieldId: string; stake: number; name?: string }): void {
     for (const m of this.rivalChips) this.layout.remove(m);
     this.rivalChips = [];
     if (!duel) {
       if (this.rivalState !== 'away') this.rivalState = 'leaving';
       return;
+    }
+    const who = duel.name === 'Der Baron' ? this.baron : this.regular;
+    if (who !== this.rival) {
+      this.rival.group.visible = false;
+      this.rival = who;
+      this.rivalState = 'away';
     }
     if (this.rivalState === 'away' || this.rivalState === 'leaving') {
       this.rivalState = 'coming';
@@ -1247,11 +1286,6 @@ export class World {
       const k = s.size * (hot ? 1.22 : 1);
       s.holder.scale.setScalar(s.holder.scale.x + (k - s.holder.scale.x) * Math.min(1, dt * 10));
     }
-    const ring = this.phoneRinging && Math.sin(this.time * 18) > 0 && this.time % 2 < 1.2;
-    this.casino.phoneHandset.position.y = 0.11 + (ring ? 0.012 : 0);
-    this.casino.phoneHandset.rotation.z = ring ? Math.sin(this.time * 60) * 0.08 : 0;
-    this.casino.phoneLamp.emissiveIntensity = this.phoneRinging ? (Math.sin(this.time * 6) > 0 ? 3 : 0.2) : 0;
-    this.casino.phoneLight.intensity = this.phoneRinging ? (Math.sin(this.time * 6) > 0 ? 4 : 0) : 0;
     this.casino.update(dt, this.time);
     for (const t of this.tickers) t(dt, this.time);
 
@@ -1265,6 +1299,9 @@ export class World {
       } else if (id === this.hoverField || this.hoverCells.has(id)) {
         target = id === this.hoverField ? 0.22 : 0.15;
         mat.color.setHex(0xfff2b0);
+      } else if (id === this.blockedField) {
+        target = 0.3 + 0.12 * Math.sin(this.time * 5);
+        mat.color.setHex(0xff2030);
       } else if (this.markCells.has(id)) {
         target = 0.15 + 0.1 * Math.sin(this.time * 4);
         mat.color.setHex(0xb48cff);
@@ -1360,10 +1397,18 @@ export class World {
         break;
       }
       case 'wheel': {
-        const k = this.wheel.progress * this.wheel.progress;
+        const p = this.wheel.progress;
+        const k = p * p;
         pos.set(W.x + 0.15 - k * 0.1, TABLE.height + 0.9 - k * 0.38, W.z + 0.58 - k * 0.12);
-        look.set(W.x, TABLE.height + 0.05, W.z + 0.04);
-        rate = 3.5;
+        // The eye follows the ball a little, and closes in on it as it settles.
+        const bp = this.wheel.ball.getWorldPosition(this.tmpBall);
+        const f = this.wheel.spinning ? 0.25 + 0.45 * k : 0.6;
+        look.set(W.x + (bp.x - W.x) * f, TABLE.height + 0.05, W.z + 0.04 + (bp.z - W.z - 0.04) * f);
+        if (p > 0.82 || !this.wheel.spinning) {
+          const z = this.wheel.spinning ? Math.min(1, (p - 0.82) / 0.18) * 0.45 : 0.45;
+          pos.lerp(this.tmpBall2.set(bp.x + (W.x - bp.x) * 0.2, bp.y + 0.32, bp.z + 0.28), z);
+        }
+        rate = p > 0.82 ? 5 : 3.5;
         break;
       }
       // Close-ups are still seen through your own eyes, just framed on what you use.
@@ -1375,10 +1420,6 @@ export class World {
         // Step back and look into the whole case: the offers can be pointed at with the mouse.
         pos.set(VITRINE.x, 1.55, VITRINE.z - VITRINE.halfW - 1.6);
         look.set(VITRINE.x, 1.05, VITRINE.z);
-        break;
-      case 'phone':
-        pos.set(PHONE_SPOT.x - 0.1, this.eyeHeight, PHONE_SPOT.z + 0.2);
-        look.set(PHONE.x, PHONE.y, PHONE.z);
         break;
       case 'smokes':
         pos.set(SMOKES_SPOT.x + 0.2, this.eyeHeight, SMOKES_SPOT.z + 0.2);

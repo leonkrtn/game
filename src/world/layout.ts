@@ -104,13 +104,10 @@ export const KASSE = { x: 1.9, z: ROOM.z0 + 1.15, halfW: 1.25, halfD: 0.45 };
  * halfW is its depth and halfD its length, in its own frame; in the room its length runs along x.
  */
 export const VITRINE = { x: TABLE.x + TABLE_LAYOUT.x, z: TABLE.z + TABLE.halfD + 2.35, halfW: 0.4, halfD: 1.1, height: 1.9 };
-/** Red telephone on the right wall. */
-export const PHONE = { x: ROOM_X1 - 0.06, z: -0.3, y: 1.35 };
 export const DOOR = { x: -3.1, z: ROOM.z0 };
 /** Cigarette machine against the back wall next to the cashier, facing the room (+z). halfW is its depth, halfD its width. */
 export const SMOKES = { x: KASSE.x + KASSE.halfW + 0.72, z: ROOM.z0 + 0.3, halfW: 0.25, halfD: 0.38 };
-/** Bar along the right wall near the front, lounge in the front left corner, jukebox at the back left. */
-export const BAR = { x: ROOM_X1 - 1.1, z: 2.1 };
+/** Lounge in the front left corner, jukebox at the back left. */
 export const LOUNGE = { x: ROOM_X0 + 1.2, z: 2.4 };
 export const JUKEBOX = { x: ROOM_X0 + 0.5, z: ROOM.z0 + 1.2 };
 export const TV = { x: ROOM_X1 - 0.55, z: -2.3 };
@@ -119,7 +116,6 @@ export const TV = { x: ROOM_X1 - 0.55, z: -2.3 };
 export const TABLE_SPOT = { x: TABLE.x + TABLE_LAYOUT.x, z: TABLE.z + TABLE.halfD + 0.45 };
 export const KASSE_SPOT = { x: KASSE.x, z: KASSE.z + KASSE.halfD + 0.55 };
 export const VITRINE_SPOT = { x: VITRINE.x, z: VITRINE.z - VITRINE.halfW - 0.55 };
-export const PHONE_SPOT = { x: PHONE.x - 0.8, z: PHONE.z };
 export const SMOKES_SPOT = { x: SMOKES.x, z: SMOKES.z + 0.95 };
 /** Where a rival stands at the table's far end during a duel, and where the loan shark stops. */
 export const RIVAL_SPOT = { x: TABLE.x + TABLE.halfW + 0.3, z: TABLE.z + 0.8 };
@@ -135,8 +131,7 @@ export const OBSTACLES: Rect[] = [
   { x0: TABLE.x - TABLE.halfW, z0: TABLE.z - TABLE.halfD, x1: TABLE.x + TABLE.halfW, z1: TABLE.z + TABLE.halfD },
   { x0: KASSE.x - KASSE.halfW, z0: ROOM.z0, x1: KASSE.x + KASSE.halfW, z1: KASSE.z + KASSE.halfD },
   { x0: VITRINE.x - VITRINE.halfD, z0: VITRINE.z - VITRINE.halfW, x1: VITRINE.x + VITRINE.halfD, z1: VITRINE.z + VITRINE.halfW },
-  // Bar, jukebox, television, lounge and the chair at the table's end.
-  { x0: BAR.x - 0.95, z0: BAR.z - 1.15, x1: ROOM_X1, z1: BAR.z + 1.15 },
+  // Jukebox, television, lounge and the chair at the table's end.
   { x0: ROOM_X0, z0: JUKEBOX.z - 0.5, x1: ROOM_X0 + 0.85, z1: JUKEBOX.z + 0.5 },
   { x0: TV.x - 0.4, z0: TV.z - 0.45, x1: ROOM_X1, z1: TV.z + 0.45 },
   { x0: ROOM_X0, z0: LOUNGE.z - 0.5, x1: LOUNGE.x + 1.0, z1: ROOM.z1 },

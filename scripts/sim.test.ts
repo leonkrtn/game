@@ -15,6 +15,8 @@ interface Bot {
   shark?: boolean;
   /** Plays the last spin of every rate as high risk. */
   risk?: boolean;
+  /** Lets wins ride up the ladder. */
+  ride?: boolean;
 }
 
 const PREFS = ['pfennig', 'kerze', 'hufeisen', 'sanduhr', 'sparschwein', 'katze', 'zinnsoldat', 'wuerfel', 'abakus', 'glocke', 'teufel', 'goldkugel', 'zigarre', 'police'];
@@ -25,7 +27,8 @@ function round(run: Run, bot: Bot): void {
   if (run.roundsLeft === 1 || run.cash >= missing * 3) run.depositCash(Math.min(missing, run.cash));
   if (bot.early && run.canPay()) {
     run.pay();
-    if (run.offers.length) run.chooseOffer(0);
+    if (run.draft.length) run.chooseCard(0);
+    if (run.freeTool) run.applyFreeTool(0, 7);
     return;
   }
   if (bot.shop) {
@@ -36,10 +39,14 @@ function round(run: Run, bot: Bot): void {
   if (bot.save) run.depositCash(Math.floor(run.cash * bot.save));
   const free = Math.max(0, run.cash - Math.max(0, run.debt - run.deposit) * 0.5);
   const stake = Math.floor(free * bot.f);
-  if (stake > 0) run.placeBet('red', Math.min(stake, run.fieldRoom('red')));
+  if (bot.ride && run.canRide) run.letItRide();
+  else if (stake > 0) run.placeBet('red', Math.min(stake, run.fieldRoom('red')));
+  // Every special chip goes on the bet.
+  if (run.bets.red) for (const c of run.chips) run.placeSpecial(c.uid, 'red');
   if (bot.risk && run.roundsLeft === 1) run.setHighRisk(true);
   run.spin();
   run.settle();
+  while (run.bonusPending > 0) run.spinBonus();
 }
 
 function play(seed: number, bot: Bot): number {
@@ -48,7 +55,8 @@ function play(seed: number, bot: Bot): number {
     if (run.phase === 'betting') round(run, bot);
     else if (run.phase === 'due') {
       run.pay();
-      if (run.offers.length) run.chooseOffer(0);
+      if (run.draft.length) run.chooseCard(0);
+    if (run.freeTool) run.applyFreeTool(0, 7);
     } else if (run.phase === 'shark') {
       if (bot.shark) run.takeShark();
       else run.declineShark();
@@ -68,6 +76,8 @@ it('balance', () => {
     { name: 'Rot 60% +Shop +Hai', f: 0.6, shop: true, early: false, shark: true },
     { name: 'Rot 30% +Shop +Risiko', f: 0.3, shop: true, early: false, risk: true },
     { name: 'Rot 30% +Shop +Hai+Ris', f: 0.3, shop: true, early: false, risk: true, shark: true },
+    { name: 'Rot 30% +Shop +Leiter', f: 0.3, shop: true, early: false, ride: true },
+    { name: 'Rot 60% +Shop +Leiter', f: 0.6, shop: true, early: false, ride: true },
   ];
   for (const bot of bots) {
     const N = 3000;

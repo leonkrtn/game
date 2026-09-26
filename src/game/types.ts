@@ -1,6 +1,6 @@
 export type Color = 'red' | 'black' | 'green';
 
-export type PocketModId = 'gold' | 'kristall' | 'flamme' | 'schwer';
+export type PocketModId = 'gold' | 'kristall' | 'flamme' | 'schwer' | 'doppel' | 'stern' | 'eis';
 
 export interface Pocket {
   /** Position on the wheel (0..36), fixed. */
@@ -8,6 +8,8 @@ export interface Pocket {
   number: number;
   color: Color;
   mod?: PocketModId;
+  /** Strength of the effect: applying the same effect again raises it (1..3). */
+  lvl?: number;
 }
 
 export type InsideKind = 'straight' | 'split' | 'street' | 'corner' | 'sixline';
@@ -46,4 +48,10 @@ export interface ShopItem {
   sold?: boolean;
   /** Buying it turns the owned copy golden. */
   fuse?: boolean;
+}
+
+/** A special chip from the chip case: placed on a field with a bet, it changes how that bet plays. */
+export interface SpecialChip {
+  uid: number;
+  def: string;
 }

@@ -1,8 +1,9 @@
 import {
-  BALLS, CONSUMABLES, DEBTS, ITEMS, MAX_CONSUMABLES, NEWS, OFFERS, POCKET_ITEMS, RULES, SETS, SHARK_FACTOR,
+  BALLS, CONSUMABLES, DEBTS, ITEMS, MAX_CONSUMABLES, NEWS, POCKET_ITEMS, RULES, SETS, SHARK_FACTOR,
   STAGES, START_KITS, type PocketToolId,
 } from '../game/content';
 import { desktop, isFullscreen } from '../fullscreen';
+import { BARON, BONUS_SEGMENTS, CARD_KIND_NAME, CARDS, SPECIAL_CHIPS, type BonusSegment } from '../game/extras';
 import { ACHIEVEMENTS, nearestUnlocks, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
@@ -90,37 +91,211 @@ export function ownedView(run: Run, hd: Pick<VitrineHandlers, 'sell' | 'move' | 
   return h('div', { class: 'menu narrow' }, head('DEINE TALISMANE', `<span class="price">◆ ${run.marks} GLÜCKSMARKEN</span>`), list);
 }
 
-// ---- Phone ---------------------------------------------------------------------------------
+// ---- The card draft after every rate (the Baron's offer) --------------------------------------
 
-export function phoneView(run: Run, choose: (i: number) => void, hangUp: () => void): HTMLElement {
-  const lines = [
-    '„Du hast bezahlt. Respekt. Ich mag Leute, die zahlen. Ich hab da was für dich …"',
-    '„Pünktlich wie ein Uhrwerk. Lass uns über dich reden, mein Freund."',
-    '„Weißt du, was ich an dir mag? Du bist noch da. Hör zu …"',
-  ];
-  const detail = h('div', { class: 'info', style: 'min-height:2.3em' });
-  const rows = h('div', { class: 'rows' });
-  run.offers.forEach((id, i) => {
-    const o = OFFERS[id];
-    rows.append(row(o.name, '', () => choose(i), { onHover: () => (detail.textContent = o.desc) }));
+const CARD_GLYPH: Record<string, string> = { deal: '✦', jeton: '◎', rad: '✺', kugel: '●●', schummel: '☂', baron: '♛' };
+
+/** Three cards on the counter: pick one. They flip in one after another. */
+export function draftView(run: Run, line: string, choose: (i: number) => void, skip: () => void): HTMLElement {
+  const cards = h('div', { class: 'cards' });
+  run.draft.forEach((id, i) => {
+    const c = CARDS[id];
+    const chip = id.startsWith('j_') ? SPECIAL_CHIPS[id.slice(2)] : undefined;
+    const card = h('button', { class: `card k-${c.kind} rar-${c.rarity}`, onclick: () => choose(i) });
+    card.style.animationDelay = `${0.15 + i * 0.18}s`;
+    card.addEventListener('mouseenter', () => {
+      document.querySelectorAll('#modal .sel').forEach((r) => r.classList.remove('sel'));
+      card.classList.add('sel');
+    });
+    const art = h('div', { class: 'art', text: CARD_GLYPH[c.kind] });
+    if (chip) {
+      art.textContent = '';
+      art.append(h('span', { class: 'chipart', style: `--c:${chip.face};--r:${chip.rim}` }));
+    }
+    card.append(
+      h('div', { class: 'kind', text: CARD_KIND_NAME[c.kind].toUpperCase() }),
+      art,
+      h('div', { class: 'name', text: c.name }),
+      h('div', { class: 'desc', text: c.desc }),
+      h('div', { class: 'key', text: String(i + 1) }),
+    );
+    cards.append(card);
   });
-  rows.append(row('AUFLEGEN', '', hangUp, { onHover: () => (detail.textContent = 'Der Boss mag es nicht, wenn man auflegt.') }));
-  if (run.offers[0]) detail.textContent = OFFERS[run.offers[0]].desc;
-  return h('div', { class: 'menu', style: 'margin-top:auto;margin-bottom:6vh;width:min(900px,100%)' },
-    h('div', { style: 'color:var(--luck);font-size:32px;text-align:center', text: 'BOSS: ' + lines[run.paidRates % lines.length] }),
-    rows,
-    detail,
+  return h('div', { class: 'draft' },
+    h('div', { class: 'baron', text: `DER BARON: ${line}` }),
+    h('div', { class: 'sub', text: 'WÄHL EINE KARTE – ODER LASS SIE LIEGEN (+◆2).' }),
+    cards,
+    h('div', { class: 'rows', style: 'width:min(420px,100%);margin:0 auto' }, row('KARTEN LIEGEN LASSEN', '+◆2', skip)),
+  );
+}
+
+// ---- Story ------------------------------------------------------------------------------------
+
+/** A few lines of story on black, typed out like a VHS caption. */
+export function storyView(lines: string[], go: () => void, button = '▶ ANS WERK'): HTMLElement {
+  const box = h('div', { class: 'story' });
+  lines.forEach((l, i) => {
+    const p = h('p', { text: l });
+    p.style.animationDelay = `${0.3 + i * 1.1}s`;
+    box.append(p);
+  });
+  const rows = h('div', { class: 'rows', style: 'width:min(360px,100%);margin:18px auto 0' }, row(button, 'ENTER', go));
+  rows.style.animationDelay = `${0.3 + lines.length * 1.1}s`;
+  rows.classList.add('late');
+  box.append(rows);
+  return box;
+}
+
+// ---- Bonus wheel -----------------------------------------------------------------------------
+
+/**
+ * The jackpot wheel: a big wheel of fortune with a flapper. `spin` asks the run for the result,
+ * then the wheel turns there with a satisfying slowdown; `done` is called when it rests.
+ */
+export function bonusWheelView(spins: number, spin: () => { index: number; text: string } | undefined, tick: () => void, win: (seg: BonusSegment, text: string) => void, done: () => void): HTMLElement {
+  const size = 460;
+  const cv = h('canvas', {}) as HTMLCanvasElement;
+  cv.width = cv.height = size * 2;
+  cv.style.width = cv.style.height = `${size}px`;
+  const g = cv.getContext('2d')!;
+  const n = BONUS_SEGMENTS.length;
+  const segA = (Math.PI * 2) / n;
+  let angle = 0;
+  const draw = (hl = -1) => {
+    const c = size;
+    g.clearRect(0, 0, c * 2, c * 2);
+    g.save();
+    g.translate(c, c);
+    g.rotate(angle);
+    BONUS_SEGMENTS.forEach((s, i) => {
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.arc(0, 0, c * 0.92, i * segA - segA / 2, i * segA + segA / 2);
+      g.closePath();
+      g.fillStyle = s.color;
+      g.fill();
+      if (i === hl) {
+        g.fillStyle = 'rgba(255,255,220,0.35)';
+        g.fill();
+      }
+      g.strokeStyle = '#e9c46a';
+      g.lineWidth = 6;
+      g.stroke();
+      g.save();
+      g.rotate(i * segA);
+      g.fillStyle = s.color === '#ffd23a' ? '#2a1a00' : '#fff6dc';
+      g.font = `700 ${s.label.length > 5 ? 34 : 54}px "VT323", monospace`;
+      g.textAlign = 'right';
+      g.textBaseline = 'middle';
+      g.fillText(s.label, c * 0.84, 0);
+      g.restore();
+    });
+    // Bulbs around the rim.
+    for (let i = 0; i < n * 2; i++) {
+      const a = (i / (n * 2)) * Math.PI * 2;
+      g.beginPath();
+      g.arc(Math.cos(a) * c * 0.96, Math.sin(a) * c * 0.96, 10, 0, Math.PI * 2);
+      g.fillStyle = (i + Math.floor(Date.now() / 150)) % 2 ? '#fff3b0' : '#8a5a10';
+      g.fill();
+    }
+    g.restore();
+    g.beginPath();
+    g.arc(c, c, c * 0.14, 0, Math.PI * 2);
+    g.fillStyle = '#e9c46a';
+    g.fill();
+    g.fillStyle = '#3a2408';
+    g.font = '700 40px "VT323", monospace';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('BONUS', c, c);
+  };
+  draw();
+  const status = h('div', { class: 'bonus-status', text: spins > 1 ? `${spins} DREHS AM BONUSRAD` : 'DAS BONUSRAD' });
+  const flapper = h('div', { class: 'flapper' });
+  const box = h('div', { class: 'bonuswheel' }, status, h('div', { class: 'wheelwrap' }, cv, flapper), h('div', { class: 'hint', text: 'LEERTASTE ODER KLICK: DREHEN' }));
+  let busy = false;
+  let left = spins;
+  const go = () => {
+    if (busy) return;
+    const r = spin();
+    if (!r) {
+      done();
+      return;
+    }
+    busy = true;
+    left--;
+    // Land the chosen segment under the flapper at the top (−90°), after 4–6 full turns.
+    const start = angle;
+    const target = -Math.PI / 2 - r.index * segA + (Math.random() - 0.5) * segA * 0.6;
+    const turns = Math.PI * 2 * (4 + Math.floor(Math.random() * 3));
+    let delta = ((target - start) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) + turns;
+    const t0 = performance.now();
+    const dur = 4200 + Math.random() * 800;
+    let lastSeg = -1;
+    const frame = (now: number) => {
+      const u = Math.min(1, (now - t0) / dur);
+      const e = 1 - Math.pow(1 - u, 4);
+      angle = start + delta * e;
+      const under = Math.round(((-Math.PI / 2 - angle) / segA) % n + n) % n;
+      if (under !== lastSeg) {
+        lastSeg = under;
+        tick();
+        flapper.classList.remove('flap');
+        void flapper.offsetWidth;
+        flapper.classList.add('flap');
+      }
+      draw(u >= 1 ? r.index : -1);
+      if (u < 1) requestAnimationFrame(frame);
+      else {
+        busy = false;
+        const seg = BONUS_SEGMENTS[r.index];
+        status.textContent = `${seg.label}: ${r.text}`;
+        status.className = 'bonus-status won' + (seg.id === 'niete' ? ' niete' : '');
+        win(seg, r.text);
+        if (left > 0) setTimeout(() => (status.textContent += `  ·  NOCH ${left} – DREHEN!`), 900);
+        else setTimeout(done, 1900);
+      }
+    };
+    requestAnimationFrame(frame);
+    delta = delta || 0.001;
+  };
+  box.addEventListener('click', go);
+  box.dataset.spin = '1';
+  (box as HTMLElement & { spin?: () => void }).spin = go;
+  return box;
+}
+
+// ---- Let it ride ---------------------------------------------------------------------------
+
+/** After a win: take the money, or let it ride one step up the ladder. */
+export function rideView(run: Run, ride: () => void, cash: () => void): HTMLElement {
+  const next = run.rideStep + 1;
+  const steps = h('div', { class: 'ladder' });
+  for (let i = 3; i >= 1; i--) {
+    steps.append(h('div', {
+      class: 'rung' + (i < next ? ' done' : i === next ? ' next' : ''),
+      html: `<b>STUFE ${i}</b><span>+${String(i * run.ridePerStep).replace('.', ',')} MULT${i === 3 ? ' · BONUSRAD' : ''}</span>`,
+    }));
+  }
+  return h('div', { class: 'menu ride', style: 'width:min(640px,100%)' },
+    head('LIEGEN LASSEN?', `<span class="money-c">${fmt(run.rideTotal)}</span>`),
+    h('p', { class: 'info', text: `Dein Gewinn bleibt auf ${Object.keys(run.rideFrom ?? {}).length > 1 ? 'seinen Feldern' : 'seinem Feld'} liegen – über das Tischlimit hinaus. Trifft es wieder, klettert die Leiter. Verliert es, ist alles weg.` }),
+    steps,
+    h('div', { class: 'rows' },
+      row(`<span class="luck-c">▲ LIEGEN LASSEN</span> – STUFE ${next}`, 'ENTER', ride),
+      row('AUSZAHLEN', 'ESC', cash),
+    ),
   );
 }
 
 // ---- Wheel ------------------------------------------------------------------------------------
 
-export function wheelView(run: Run, close: () => void, upgrade?: { index: number; apply: (pocket: number, num?: number) => void }): HTMLElement {
+export function wheelView(run: Run, close: () => void, upgrade?: { tool: PocketToolId; free?: boolean; apply: (pocket: number, num?: number) => void }): HTMLElement {
   const box = h('div', { class: 'menu', style: 'width:min(640px,100%)' });
-  const def = upgrade ? POCKET_ITEMS[run.shop[upgrade.index].def as PocketToolId] : undefined;
+  const def = upgrade ? POCKET_ITEMS[upgrade.tool] : undefined;
   const render = (chosen?: Pocket) => {
     box.replaceChildren(
-      head(def ? def.name : 'DAS RAD', 'ESC ZURÜCK'),
+      head(def ? def.name + (upgrade?.free ? ' · GRATIS' : '') : 'DAS RAD', upgrade?.free ? 'FACH WÄHLEN' : 'ESC ZURÜCK'),
       h('p', {
         class: 'info',
         text: def
@@ -140,7 +315,8 @@ export function wheelView(run: Run, close: () => void, upgrade?: { index: number
         center: def ? 'FACH<br>WÄHLEN' : `${reds}× ROT<br>${blacks}× SCHWARZ<br>${37 - reds - blacks}× GRÜN`,
       }),
       modLegend(),
-      h('div', { class: 'rows' }, row('ZURÜCK', 'ESC', close)),
+      h('div', { class: 'info', text: 'Gleicher Effekt nochmal aufs selbe Fach: es steigt eine Stufe (bis III).' }),
+      upgrade?.free ? h('div', {}) : h('div', { class: 'rows' }, row('ZURÜCK', 'ESC', close)),
     );
   };
   render();
@@ -252,7 +428,7 @@ export function collectionView(profile: Profile, back: () => void): HTMLElement 
     list.append(h('div', { class: 'ach' + (done ? ' done' : '') },
       h('span', { text: done ? '◆' : '◇' }),
       h('span', { text: `${a.name.toUpperCase()} – ${a.desc}` }),
-      h('span', { class: 'd', text: (done ? 'Freigeschaltet: ' : 'Schaltet frei: ') + a.rewards.map(rewardName).join(', ') }),
+      h('span', { class: 'd', text: a.rewards.length ? (done ? 'Freigeschaltet: ' : 'Schaltet frei: ') + a.rewards.map(rewardName).join(', ') : (done ? 'Geschafft.' : 'Für die Sammlung.') }),
     ));
   }
   return h('div', { class: 'menu' },
@@ -270,7 +446,10 @@ export function controlsView(back: () => void): HTMLElement {
     ['← →', 'DREHEN OHNE MAUS'],
     ['ESC / Q / P', 'PAUSE, EINSTELLUNGEN, ZURÜCK'],
     ['F', 'VOLLBILD AN/AUS'],
-    ['E', 'TISCH, KASSE, VITRINE, TELEFON, AUTOMAT'],
+    ['E', 'TISCH, KASSE, VITRINE, AUTOMAT'],
+    ['G', 'MAGNET UNTERM TISCH (SCHUMMELN, VERDACHT)'],
+    ['N', 'KUGEL ANSTOSSEN – IM GRÜNEN BEREICH DRÜCKEN'],
+    ['SPEZIALJETONS', 'IM ETUI ANKLICKEN, DANN AUFS FELD MIT EINSATZ'],
     ['TAB', 'ÜBERSICHT: TALISMANE, SETS, TASCHE, BONI'],
     ['LINKSKLICK', 'JETON SETZEN – AUCH AUF LINIEN UND ECKEN'],
     ['RECHTSKLICK', 'JETON ZURÜCKNEHMEN'],
@@ -310,7 +489,7 @@ function nextUnlocks(profile: Profile, run: Run): HTMLElement | null {
   return h('div', { class: 'next-unlocks' },
     h('div', { class: 't', text: 'FAST GESCHAFFT – NÄCHSTE FREISCHALTUNGEN:' }),
     ...list.map(({ a, have, need }) => h('div', {
-      text: `▸ ${a.name.toUpperCase()}${need ? ` (${progress(have ?? 0, need)})` : ''}: ${a.desc} → ${a.rewards.map(rewardName).join(', ').toUpperCase()}`,
+      text: `▸ ${a.name.toUpperCase()}${need ? ` (${progress(have ?? 0, need)})` : ''}: ${a.desc}${a.rewards.length ? ` → ${a.rewards.map(rewardName).join(', ').toUpperCase()}` : ''}`,
     })),
   );
 }
@@ -331,7 +510,8 @@ export function victoryView(run: Run, endless: () => void, restart: () => void):
   return h('div', { class: 'caught' },
     h('div', { style: 'font-size:34px', text: '■ ENDE DER AUFNAHME' }),
     h('h1', { style: 'color:var(--money)', text: 'FREI.' }),
-    h('div', { style: 'font-size:28px', text: `ALLE ${DEBTS.length} RATEN BEZAHLT. DIE HERREN NICKEN UND GEHEN.` }),
+    h('div', { style: 'font-size:28px', text: `ALLE ${DEBTS.length} RATEN BEZAHLT. DER BARON IST GESCHLAGEN.` }),
+    h('div', { class: 'story inline' }, ...BARON.ending.map((l) => h('p', { text: l }))),
     h('div', { style: 'font-size:24px;opacity:.85', text: run.stage < 5 ? `SCHULDENSTUFE ${run.stage + 1} IST JETZT FREIGESCHALTET.` : 'DU HAST DIE HÖCHSTE SCHULDENSTUFE GESCHAFFT.' }),
     runSummary(run),
     h('div', { class: 'rows' }, row('▶ WEITERSPIELEN (ENDLOS)', '', endless), row('◀◀ NEUES BAND', '', restart)),
@@ -350,7 +530,7 @@ export function rateReasons(run: Run): string {
   if (run.news === 'razzia') r.push('Razzia −20 %');
   if (run.news === 'inflation') r.push('Inflation +20 %');
   if (run.cycle >= run.sharkFrom) r.push(`Kredithai +${Math.round((SHARK_FACTOR - 1) * 100)} %`);
-  if (run.debtFactor !== 1) r.push(`Telefon ×${run.debtFactor.toLocaleString('de-DE', { maximumFractionDigits: 2 })}`);
+  if (run.debtFactor !== 1) r.push(`Baron ×${run.debtFactor.toLocaleString('de-DE', { maximumFractionDigits: 2 })}`);
   if (run.debtAdd) r.push(`Aufschlag +${fmt(run.debtAdd)}`);
   return r.join(' · ');
 }
@@ -363,6 +543,13 @@ export function overviewView(run: Run, close: () => void): HTMLElement {
   for (const t of run.items) {
     items.append(h('div', { class: 'ov' }, h('span', { class: 'n ' + rarityClass(t.def), text: itemName(t) }), h('span', { class: 'd', text: itemDesc(t) })));
   }
+  items.append(label(`JETON-ETUI ${run.chips.length}/6 · JEDER WIRKT EINMAL PRO RATE`));
+  if (!run.chips.length) items.append(h('div', { class: 'info', text: 'Leer. Spezialjetons gibt es auf den Karten des Barons und am Bonusrad.' }));
+  for (const c of run.chips) {
+    const d = SPECIAL_CHIPS[c.def];
+    items.append(h('div', { class: 'ov' + (run.usedChips.has(c.uid) ? ' used' : '') }, h('span', { class: 'n', text: `◎ ${d.name}${run.usedChips.has(c.uid) ? ' (VERBRAUCHT)' : ''}` }), h('span', { class: 'd', text: d.desc })));
+  }
+  if (run.chips.length >= 3) items.append(h('div', { class: 'info luck-c', text: 'Drei verschiedene Jetons in einem Dreh: VOLLES ETUI ×1,5 Mult.' }));
   items.append(label('SETS · DREI TALISMANE, DIE ZUSAMMENGEHÖREN'));
   for (const set of SETS) {
     const have = set.items.filter((d) => run.has(d));
@@ -378,6 +565,9 @@ export function overviewView(run: Run, close: () => void): HTMLElement {
     stat('GLÜCK', `${run.luck} → ${pct(run.hopChance)} NACHHOPSER`),
     stat('ZINSEN AUF EINZAHLUNG', pct(run.interestRate) + ' PRO DREH'),
     stat('GLÜCKSMARKEN', `◆${run.marks}`),
+    stat('VERDACHT', `${run.suspicion}/100${run.suspicion >= 70 ? ' – VORSICHT' : ''}`),
+    stat('LIEGENLASSEN-LEITER', `+${String(run.ridePerStep).replace('.', ',')} MULT PRO STUFE`),
+    run.doubleCharges ? stat('DOPPELKUGEL', `${run.doubleCharges} DREH${run.doubleCharges > 1 ? 'S' : ''}`) : null,
     stat('KUGEL', `${BALLS[run.ball].name.toUpperCase()}`),
     h('div', { class: 'info', text: BALLS[run.ball].desc }),
     run.perks.redMult || run.perks.blackMult ? stat('DAUER-BONI', `ROT +${run.perks.redMult} · SCHWARZ +${run.perks.blackMult} MULT`) : null,
@@ -388,7 +578,7 @@ export function overviewView(run: Run, close: () => void): HTMLElement {
     run.rule ? h('div', { class: 'info', text: `HAUSREGEL: ${RULES[run.rule].name} – ${RULES[run.rule].desc}` }) : null,
     run.sharkUsed ? h('div', { class: 'info rec-c', text: run.sharkFrom !== Infinity ? `Du hast beim Kredithai geliehen: alle späteren Raten +${Math.round((SHARK_FACTOR - 1) * 100)} %.` : 'Den Kredithai hast du abgewiesen. Er kommt nicht wieder.' }) : null,
     label(`TASCHE ${run.smokes.length}/${MAX_CONSUMABLES}`),
-    run.smokes.length ? h('div', { class: 'info', text: run.smokes.map((id) => `${CONSUMABLES[id].name}: ${CONSUMABLES[id].desc}`).join('\n') }) : h('div', { class: 'info', text: 'Leer. Der Zigarettenautomat an der rechten Wand verkauft Sachen für einen Dreh.' }),
+    run.smokes.length ? h('div', { class: 'info', text: run.smokes.map((id) => `${CONSUMABLES[id].name}: ${CONSUMABLES[id].desc}`).join('\n') }) : h('div', { class: 'info', text: 'Leer. Der Zigarettenautomat neben der Kasse verkauft Sachen für einen Dreh.' }),
     boostLabels(run).length ? h('div', { class: 'info luck-c', text: 'AKTIV FÜR DEN NÄCHSTEN DREH: ' + boostLabels(run).join(' · ') }) : null,
   );
   return h('div', { class: 'menu' },

@@ -66,7 +66,7 @@ export function itemPrice(id: string): number {
 
 // ---- Wheel upgrades ---------------------------------------------------------
 
-export type PocketToolId = PocketModId | 'pinsel' | 'farbe';
+export type PocketToolId = PocketModId | 'pinsel' | 'farbe' | 'kopie';
 
 export interface PocketItemDef {
   id: PocketToolId;
@@ -83,13 +83,36 @@ export const POCKET_ITEMS: Record<PocketToolId, PocketItemDef> = {
   schwer: { id: 'schwer', name: 'Schweres Fach', price: 3, desc: 'Die Kugel landet doppelt so oft in diesem Fach.', weight: 2 },
   pinsel: { id: 'pinsel', name: 'Umnummerieren', price: 2, desc: 'Gib einem Fach eine neue Zahl (0–36). Die Farbe passt sich an.', weight: 3 },
   farbe: { id: 'farbe', name: 'Farbwechsel', price: 2, desc: 'Ein Fach wechselt Rot ↔ Schwarz (Grün wird Rot).', weight: 2 },
+  doppel: { id: 'doppel', name: 'Doppelfach', price: 4, desc: 'Landet die Kugel hier: Summe ×2.', weight: 2 },
+  stern: { id: 'stern', name: 'Sternfach', price: 4, desc: 'Landet die Kugel hier und du gewinnst: Das Bonusrad dreht sich.', weight: 2 },
+  eis: { id: 'eis', name: 'Eisfach', price: 3, desc: 'Landet die Kugel hier und du verlierst: 30 % der Einsätze zurück.', weight: 2 },
+  kopie: { id: 'kopie', name: 'Abklatsch', price: 3, desc: 'Beide Nachbarn eines Fachs werden zu seinen Kopien (Zahl, Farbe, Effekt).', weight: 2 },
 };
+
+/** Applying an effect to a pocket that already has it raises its level up to this. */
+export const MAX_POCKET_LVL = 3;
+
+/** What an effect does at a given level, for tooltips and the wheel view. */
+export function pocketModText(mod: PocketModId, lvl = 1): string {
+  switch (mod) {
+    case 'gold': return `+${lvl} Glücksmarke${lvl > 1 ? 'n' : ''}`;
+    case 'kristall': return `×${lvl + 1} Mult`;
+    case 'flamme': return `+${lvl} Mult`;
+    case 'schwer': return `${lvl + 1}× Chance`;
+    case 'doppel': return `Summe ×${lvl + 1}`;
+    case 'stern': return lvl > 1 ? `Bonusrad ×${lvl}` : 'Bonusrad';
+    case 'eis': return `${Math.min(90, 30 * lvl)} % zurück bei Verlust`;
+  }
+}
 
 export const POCKET_MOD_INFO: Record<PocketModId, { name: string; short: string; color: string }> = {
   gold: { name: 'Gold', short: '+1 Glücksmarke', color: '#f2c14e' },
   kristall: { name: 'Kristall', short: '×2 Mult', color: '#7fe7ff' },
   flamme: { name: 'Flamme', short: '+1 Mult', color: '#ff7a2f' },
   schwer: { name: 'Schwer', short: '2× Chance', color: '#b39bff' },
+  doppel: { name: 'Doppel', short: 'Summe ×2', color: '#4fe08a' },
+  stern: { name: 'Stern', short: 'Bonusrad', color: '#ff5ad0' },
+  eis: { name: 'Eis', short: '30 % zurück', color: '#cfe8ff' },
 };
 
 // ---- House rules ------------------------------------------------------------
@@ -165,7 +188,7 @@ export const STAGES = [
 // ---- Money --------------------------------------------------------------------
 
 /** Rate due after each cycle. Paying the last one wins the run. */
-export const DEBTS = [30, 55, 100, 190, 380, 760, 1550, 3300];
+export const DEBTS = [30, 55, 100, 210, 460, 1050, 2400, 5600];
 export const ROUNDS_PER_CYCLE = 3;
 
 /**

@@ -120,7 +120,7 @@ describe('Run', () => {
     expect(run.deposit).toBe(216 - DEBTS[0]);
     expect(run.marks).toBe(marks + 3 + early);
     expect(run.cycle).toBe(1);
-    expect(run.offers.length).toBe(3);
+    expect(run.draft.length).toBe(3);
   });
 
   it('debt stages make rates harder and the sunglasses ignore house rules', () => {
@@ -214,11 +214,11 @@ describe('Run', () => {
     for (let i = 0; i < 40; i++) {
       if (run.phase === 'due') {
         run.pay();
-        run.offers = [];
+        run.draft = [];
         run.phase = 'betting';
       }
       if (run.phase === 'victory') run.continueEndless();
-      if (run.duel) duels++;
+      if (run.duel && run.duel.name !== 'Der Baron') duels++;
       run.placeBet('red', 5);
       run.spin();
       run.settle();
@@ -263,6 +263,8 @@ describe('shown odds match the real spin', () => {
   for (const [name, setup] of scenarios) {
     it(name, () => {
       const run = new Run({ seed: 21 });
+      run.doubleCharges = 0;
+      run.chips = [];
       run.news = '';
       run.rule = undefined;
       run.cash = 1e6;
@@ -277,7 +279,9 @@ describe('shown odds match the real spin', () => {
         run.phase = 'betting';
         run.bets = structuredClone(snapshot.bets);
         run.bribed = snapshot.bribed;
-        run.bribesThisCycle = -1; // no risk of being seen, and no price, for this check
+        run.bribesThisCycle = -1; // no price for this check
+        run.suspicion = 0;
+        run.doubleCharges = 0;
         run.visions = [...snapshot.visions];
         const cash = run.cash;
         const r = run.spin();
@@ -364,14 +368,14 @@ describe('table limits', () => {
 });
 
 describe('streaks and hit preview', () => {
-  it('adds a growing, capped mult on a win streak and a token every third profit', () => {
+  it('adds a growing, capped mult on a win streak and a bonus wheel spin every third profit', () => {
     const inp = input({ bets: { red: [10] } });
     const at = idx(inp.wheel, 1);
     expect(scoreSpin({ ...inp, winStreak: 0 }, at).mult).toBe(1);
     expect(scoreSpin({ ...inp, winStreak: 2 }, at).mult).toBeCloseTo(1.2);
     expect(scoreSpin({ ...inp, winStreak: 50 }, at).mult).toBeCloseTo(1.5);
-    expect(scoreSpin({ ...inp, winStreak: 2 }, at).marks).toBe(1);
-    expect(scoreSpin({ ...inp, winStreak: 1 }, at).marks).toBe(0);
+    expect(scoreSpin({ ...inp, winStreak: 2 }, at).bonus).toBe(1);
+    expect(scoreSpin({ ...inp, winStreak: 1 }, at).bonus).toBe(0);
     // A loss pays nothing, streak or not.
     expect(scoreSpin({ ...inp, winStreak: 2 }, idx(inp.wheel, 2)).payout).toBe(0);
   });
@@ -385,5 +389,115 @@ describe('streaks and hit preview', () => {
     const mixed = run.previewHit('doz0')!;
     expect(mixed.min).toBe(1);
     expect(mixed.max).toBe(2);
+  });
+});
+
+describe('beyond roulette', () => {
+  const chip = (def: string, fieldId: string, uid = 1) => ({ uid, def, fieldId });
+
+  it('special chips change how their field plays', () => {
+    const inp = input({ bets: { red: [10], n2: [2] } });
+    const red = idx(inp.wheel, 1);
+    const black = idx(inp.wheel, 2);
+    expect(scoreSpin({ ...inp, specials: [chip('glas', 'red')] }, red).payout).toBe(30);
+    expect(scoreSpin({ ...inp, specials: [chip('glas', 'red')] }, black).broken).toEqual([1]);
+    expect(scoreSpin({ ...inp, specials: [chip('zwilling', 'red')] }, red).payout).toBe(40);
+    // Lead gives half the losing field back even though the plein won.
+    expect(scoreSpin({ ...inp, specials: [chip('blei', 'red')] }, black).payout).toBe(2 * 36 + 5);
+    expect(scoreSpin({ ...inp, specials: [chip('gold', 'red')] }, red).marks).toBe(1);
+    expect(scoreSpin({ ...inp, specials: [chip('feuer', 'red')] }, red).mult).toBe(1.5);
+    // Neighbour chip: the plein next to the ball wins ×12.
+    const nextTo = (inp.wheel.findIndex((p) => p.number === 2) + 1) % 37;
+    expect(scoreSpin({ ...inp, bets: { n2: [2] }, specials: [chip('nachbar', 'n2')] }, nextTo).payout).toBe(24);
+    // Three different chips: the full case.
+    const three = [chip('gold', 'red', 1), chip('feuer', 'red', 2), chip('blei', 'n2', 3)];
+    expect(scoreSpin({ ...inp, specials: three }, red).mult).toBeCloseTo(2.25);
+  });
+
+  it('pocket effects stack up in levels, and the copy thins the wheel', () => {
+    const run = new Run({ seed: 5 });
+    run.marks = 100;
+    const p = run.wheel[10];
+    run.freeTool = 'kristall';
+    expect(run.applyFreeTool(10)).toBe(true);
+    run.freeTool = 'kristall';
+    run.applyFreeTool(10);
+    expect(p.mod).toBe('kristall');
+    expect(p.lvl).toBe(2);
+    run.freeTool = 'kopie';
+    run.applyFreeTool(10);
+    expect(run.wheel[9].number).toBe(p.number);
+    expect(run.wheel[11].number).toBe(p.number);
+    expect(run.wheel[11].lvl).toBe(2);
+  });
+
+  it('let it ride puts the win back past the table limit, up to three steps', () => {
+    const run = new Run({ seed: 8 });
+    run.doubleCharges = 0;
+    run.cash = 1000;
+    run.placeBet('red', 20);
+    run.spin();
+    run.lastResult = scoreSpin({ ...input({ bets: { red: [20] } }), wheel: run.wheel }, run.wheel.findIndex((p) => p.color === 'red'));
+    run.settle();
+    expect(run.canRide).toBe(true);
+    expect(run.rideTotal).toBe(40);
+    run.letItRide();
+    expect(run.stakeTotal).toBe(40);
+    expect(run.rideStep).toBe(1);
+    expect(run.outlook().ev).toBeGreaterThan(-5);
+  });
+
+  it('cards come in threes after a rate and do what they say', () => {
+    const run = new Run({ seed: 9 });
+    run.cash = 1000;
+    run.depositCash(1000);
+    run.pay();
+    expect(run.draft.length).toBe(3);
+    expect(run.draft.some((id) => id.startsWith('j_') || id.startsWith('r_'))).toBe(true);
+    run.draft = ['j_zwilling', 'glueck', 'marken'];
+    const n = run.chips.length;
+    run.chooseCard(0);
+    expect(run.chips.length).toBe(n + 1);
+    expect(run.draft.length).toBe(0);
+  });
+
+  it('cheating fills the suspicion meter until the floor manager steps in', () => {
+    const run = new Run({ seed: 10 });
+    run.cash = 1e6;
+    run.doubleCharges = 0;
+    run.suspicion = 90;
+    run.placeBet('n7', 5);
+    const before = run.debt;
+    run.toggleMagnet();
+    run.spin();
+    expect(run.caught).toBe(true);
+    expect(run.stakeTotal).toBe(0);
+    expect(run.debt).toBeGreaterThan(before);
+    expect(run.suspicion).toBeLessThan(90);
+  });
+
+  it('the bonus wheel pays out', () => {
+    const run = new Run({ seed: 12 });
+    run.bonusPending = 3;
+    run.bonusBase = 50;
+    const cash = run.cash, marks = run.marks;
+    for (let i = 0; i < 3; i++) expect(run.spinBonus()).toBeDefined();
+    expect(run.spinBonus()).toBeUndefined();
+    expect(run.cash + run.marks).toBeGreaterThanOrEqual(cash + marks);
+  });
+
+  it('the Baron plays the last rate himself', () => {
+    const run = new Run({ seed: 14 });
+    run.cash = 1e9;
+    while (run.cycle < 7) {
+      run.depositCash(run.cash);
+      run.cash = 1e9;
+      run.pay();
+      run.draft = [];
+      run.freeTool = undefined;
+    }
+    expect(run.bossRate).toBe(true);
+    expect(run.duel?.name).toBe('Der Baron');
+    expect(run.blocked).toBeDefined();
   });
 });

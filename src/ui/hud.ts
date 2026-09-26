@@ -1,8 +1,9 @@
-import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_ITEMS, POCKET_MOD_INFO, RARITY, RULES, SETS, STAGES, type PocketToolId } from '../game/content';
+import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_ITEMS, POCKET_MOD_INFO, pocketModText, RARITY, RULES, SETS, STAGES, type PocketToolId } from '../game/content';
 import { FIELD_BY_ID, fieldWins, KIND_NAME } from '../game/fields';
 import type { Run } from '../game/run';
 import { streakBonus, type Line } from '../game/scoring';
 import { buildFocus, fitReason } from './guide';
+import { SPECIAL_CHIPS } from '../game/extras';
 import type { ItemInstance, Pocket } from '../game/types';
 import { COLOR_NAME, POCKET_COUNT, standardColor } from '../game/wheel';
 import { $, fmt, fmtMult, h } from './dom';
@@ -83,6 +84,7 @@ export function renderOsd(run: Run, cash: number, tape: number, compact = false)
     h('div', { class: 'line', html: `KASSE <span class="debt">${fmt(run.deposit)}</span>  ${run.deposit >= run.debt ? '<span class="money">RATE GEDECKT</span>' : covered ? `NOCH ${fmt(run.debt - run.deposit)} – BARGELD REICHT` : `<span class="warn-soft">FEHLT ${fmt(run.debt - run.deposit - run.cash)}</span>`}` }),
     h('div', { class: 'line', html: `BARGELD <span class="money">${fmt(cash)}</span>${run.stakeTotal ? `  IM SPIEL ${fmt(run.stakeTotal)}` : ''}` }),
     h('div', { class: 'line', html: `<span class="marks">◆${run.marks}</span>  <span class="luck">GLÜCK ${run.luck}</span>  ZINS ${pct(run.interestRate)}  TALISMANE ${run.items.length}/${run.perks.slots}` }),
+    run.suspicion > 0 ? h('div', { class: 'line', html: `<span class="${run.suspicion >= 70 ? 'warn' : 'warn-soft'}">VERDACHT ${run.suspicion}/100</span>${run.chips.length ? `  JETONS ${run.chips.length}` : ''}` }) : null,
     run.news && !compact ? h('div', { class: 'line news', html: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }) : null,
     compact ? null : h('div', {
       class: 'rule',
@@ -162,9 +164,20 @@ export interface TableHandlers {
   bribe(): void;
   risk(): void;
   smoke(i: number): void;
+  special(uid: number): void;
+  magnet(): void;
 }
 
-export function renderTableBar(run: Run, selected: number, hd: TableHandlers, busy: boolean): void {
+/** A special chip's face, as in the tray. */
+export function specialFace(def: string): HTMLElement {
+  const d = SPECIAL_CHIPS[def];
+  const e = h('div', { class: 'chipface special', text: d.name.slice(0, 2).toUpperCase() });
+  e.style.setProperty('--c', d.face);
+  e.style.setProperty('--r', d.rim);
+  return e;
+}
+
+export function renderTableBar(run: Run, selected: number, hd: TableHandlers, busy: boolean, special?: number): void {
   const chips = $('chips');
   chips.replaceChildren();
   availableChips(run.cash + run.stakeTotal).forEach((v, i) => {
@@ -172,6 +185,24 @@ export function renderTableBar(run: Run, selected: number, hd: TableHandlers, bu
     b.append(chipFace(v), h('span', { class: 'k', text: `${i + 1}` }));
     chips.append(b);
   });
+  // The chip case: special chips, placed on a field that carries a bet.
+  if (run.chips.length) {
+    const tray = h('div', { class: 'specials' });
+    for (const c of run.chips) {
+      const on = run.placed[c.uid];
+      const b = h('button', {
+        class: 'chipbtn sp' + (special === c.uid ? ' sel' : '') + (on ? ' on' : ''),
+        onclick: () => hd.special(c.uid),
+        disabled: busy,
+        title: `${SPECIAL_CHIPS[c.def].name}: ${SPECIAL_CHIPS[c.def].desc}`,
+      });
+      const used = run.usedChips.has(c.uid);
+      if (used) b.disabled = true;
+      b.append(specialFace(c.def), h('span', { class: 'k', text: used ? 'NÄCHSTE RATE' : on ? FIELD_BY_ID[on].label.slice(0, 6) : SPECIAL_CHIPS[c.def].name.replace('jeton', '') }));
+      tray.append(b);
+    }
+    chips.append(tray);
+  }
   const hasLast = Object.keys(run.lastBets).length > 0;
   $('actions').replaceChildren(
     h('button', { onclick: hd.spin, disabled: busy || run.phase !== 'betting', html: '<kbd>LEER</kbd> DREHEN' }),
@@ -186,7 +217,12 @@ export function renderTableBar(run: Run, selected: number, hd: TableHandlers, bu
       class: run.bribed ? 'on' : '',
       html: run.bribed
         ? `<kbd>B</kbd> BESTOCHEN · ${fmt(run.bribePrice)} BEIM DREHEN`
-        : run.stakeTotal === 0 ? '<kbd>B</kbd> BESTECHEN (ERST SETZEN)' : `<kbd>B</kbd> BESTECHEN ${fmt(run.bribePrice)} · RISIKO ${pct(run.bribeRisk)}`,
+        : run.stakeTotal === 0 ? '<kbd>B</kbd> BESTECHEN (ERST SETZEN)' : `<kbd>B</kbd> BESTECHEN ${fmt(run.bribePrice)} · +${run.bribeSuspicion} VERDACHT`,
+    }),
+    h('button', {
+      onclick: hd.magnet, disabled: busy || (!run.cheatMagnet && !Object.keys(run.bets).some((f) => FIELD_BY_ID[f].kind === 'straight')),
+      class: run.cheatMagnet ? 'on risk' : '',
+      html: run.cheatMagnet ? `<kbd>G</kbd> MAGNET AN · PLEINS ×2` : `<kbd>G</kbd> MAGNET UNTERM TISCH · +${Math.round(14 * run.magnetCost)} VERDACHT`,
     }),
     run.roundsLeft === 1 ? h('button', {
       onclick: hd.risk, disabled: busy || !run.canHighRisk, class: run.highRisk ? 'on risk' : 'risk',
@@ -256,9 +292,17 @@ export function renderSlip(run: Run, show: boolean): void {
   if (focus.length) rows.push(h('div', { class: 'boost', text: `DEIN BUILD ZAHLT AUF: ${focus.map((f) => f.focus).join(' · ')}` }));
   const boosts = boostLabels(run);
   if (boosts.length) rows.push(h('div', { class: 'boost', text: 'AKTIV: ' + boosts.join(' · ') }));
+  if (run.doubleNext) rows.push(h('div', { class: 'boost hot', text: `DOPPELKUGEL: ZWEI KUGELN ROLLEN, JEDE ZAHLT FÜR SICH.${run.doubleCharges > 1 ? ` (NOCH ${run.doubleCharges})` : ''}` }));
+  if (run.riding) rows.push(h('div', { class: 'boost hot', text: `LEITER STUFE ${run.rideStep}: +${String(run.rideStep * run.ridePerStep).replace('.', ',')} MULT` }));
+  if (run.blocked) rows.push(h('div', { class: 'duel', text: `DER BARON SPERRT ${FIELD_BY_ID[run.blocked].label.toUpperCase()}: WETTEN DORT GEWINNEN NICHT.` }));
+  const placed = run.placedSpecials;
+  if (placed.length) rows.push(h('div', { class: 'boost', text: 'JETONS: ' + placed.map((c) => `${SPECIAL_CHIPS[c.def].name} auf ${FIELD_BY_ID[c.fieldId].label}`).join(' · ') + (new Set(placed.map((c) => c.def)).size >= 3 ? ' · VOLLES ETUI ×1,5' : '') }));
+  rows.push(h('div', { class: 'susp' }, h('span', { text: `VERDACHT ${run.suspicion}/100` }), h('div', { class: 'meter' + (run.suspicion >= 70 ? ' danger' : '') }, h('i', { style: `width:${run.suspicion}%` }))));
   if (run.duel) {
     const f = FIELD_BY_ID[run.duel.fieldId];
-    rows.push(h('div', { class: 'duel', text: `DUELL: ${run.duel.name.toUpperCase()} SETZT ${fmt(run.duel.stake)} AUF ${f.label.toUpperCase()}. GEWINN MEHR ALS ER: +◆3 UND SEIN EINSATZ. SONST RATE +15 %.` }));
+    rows.push(h('div', { class: 'duel', text: run.duel.name === 'Der Baron'
+      ? `DER BARON SETZT ${fmt(run.duel.stake)} AUF ${f.label.toUpperCase()}. GEWINNST DU MEHR ALS ER, SINKT DIE RATE UM 10 %.`
+      : `DUELL: ${run.duel.name.toUpperCase()} SETZT ${fmt(run.duel.stake)} AUF ${f.label.toUpperCase()}. GEWINN MEHR ALS ER: +◆3 UND SEIN EINSATZ. SONST RATE +15 %.` }));
   }
   rows.push(h('div', { class: 'title small', text: `TALISMANE ${run.items.length}/${run.perks.slots} · GLÜCK ${run.luck} = ${pct(run.hopChance)} NACHHOPSER` }));
   if (!run.items.length) rows.push(h('div', { class: 'hint', text: 'Noch keine. Die Vitrine verkauft sie gegen Glücksmarken.' }));
@@ -427,7 +471,7 @@ export function openModal(content: HTMLElement, style: MenuStyle = 'vcr', onBack
   m.onclick = (e) => {
     if (e.target === m) onBackdrop?.();
   };
-  const first = m.querySelector<HTMLButtonElement>('button.row:not(:disabled)');
+  const first = m.querySelector<HTMLButtonElement>('button.card') ?? m.querySelector<HTMLButtonElement>('button.row:not(:disabled)');
   first?.classList.add('sel');
 }
 
@@ -443,9 +487,11 @@ export function modalOpen(): boolean {
 
 /** Arrow keys move the highlight through menu rows, Enter activates it. */
 export function navModal(key: string): boolean {
-  const rows = [...document.querySelectorAll<HTMLButtonElement>('#modal button.row:not(:disabled)')];
+  const rows = [...document.querySelectorAll<HTMLButtonElement>('#modal button.card, #modal button.row:not(:disabled)')];
   if (!rows.length) return false;
   let i = rows.findIndex((r) => r.classList.contains('sel'));
+  // Cards sit side by side: left and right move between them.
+  if ((key === 'ArrowLeft' || key === 'ArrowRight') && rows[i]?.classList.contains('card')) key = key === 'ArrowLeft' ? 'ArrowUp' : 'ArrowDown';
   if (key === 'ArrowDown' || key === 'ArrowUp') {
     rows[i]?.classList.remove('sel');
     i = key === 'ArrowDown' ? (i + 1) % rows.length : (i - 1 + rows.length) % rows.length;
@@ -488,12 +534,15 @@ export function wheelRing(run: Run, opts: { pick?: (p: Pocket) => void; center?:
     const e = h('div', {
       class: `p ${p.color}` + (opts.pick ? ' pickable' : '') + (run.visions.includes(p.index) ? ' vision' : ''),
       text: String(p.number),
-      title: `${p.number} ${COLOR_NAME[p.color]}${p.mod ? ' · ' + POCKET_MOD_INFO[p.mod].name + ': ' + POCKET_MOD_INFO[p.mod].short : ''}`,
+      title: `${p.number} ${COLOR_NAME[p.color]}${p.mod ? ' · ' + POCKET_MOD_INFO[p.mod].name + ((p.lvl ?? 1) > 1 ? ` ${'I'.repeat(p.lvl ?? 1)}` : '') + ': ' + pocketModText(p.mod, p.lvl) : ''}`,
       onclick: opts.pick ? () => opts.pick!(p) : undefined,
     });
     e.style.left = `${210 + Math.cos(a) * R}px`;
     e.style.top = `${210 + Math.sin(a) * R}px`;
-    if (p.mod) e.style.borderColor = POCKET_MOD_INFO[p.mod].color;
+    if (p.mod) {
+      e.style.borderColor = POCKET_MOD_INFO[p.mod].color;
+      e.style.borderWidth = `${2 + (p.lvl ?? 1)}px`;
+    }
     ring.append(e);
     const c = h('span', { class: 'ch', text: pct(ch[p.index]) });
     c.style.left = `${210 + Math.cos(a) * (R - 38)}px`;

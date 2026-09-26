@@ -75,6 +75,48 @@ class Sfx {
     this.noise(0.6, 0.12, 1200);
     this.tone(220, 0.5, 'sine', 0.05, 0, 200);
   }
+  /** The ball knocking on a brass diamond: a hard, bright click with a little ring. */
+  knock(strength: number): void {
+    this.noise(0.03, 0.4 + 0.5 * strength, 6500);
+    this.tone(2400 + Math.random() * 400, 0.06, 'triangle', 0.08 * strength);
+    this.tone(900, 0.04, 'square', 0.03 * strength);
+  }
+
+  // The ball rolling on the wooden track: filtered noise that follows its speed.
+  private rollSrc?: AudioBufferSourceNode;
+  private rollGain?: GainNode;
+  private rollFilter?: BiquadFilterNode;
+
+  /** 0 = silent, 1 = the ball races around the track. */
+  roll(level: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master) return;
+    if (!this.rollSrc) {
+      const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < d.length; i++) {
+        // Brown-ish noise with tiny grain clicks: wood and steel.
+        last = (last + (Math.random() * 2 - 1) * 0.08) * 0.985;
+        d[i] = last * 3 + (Math.random() < 0.002 ? (Math.random() - 0.5) * 0.6 : 0);
+      }
+      this.rollSrc = ctx.createBufferSource();
+      this.rollSrc.buffer = buf;
+      this.rollSrc.loop = true;
+      this.rollFilter = ctx.createBiquadFilter();
+      this.rollFilter.type = 'bandpass';
+      this.rollFilter.Q.value = 0.8;
+      this.rollGain = ctx.createGain();
+      this.rollGain.gain.value = 0;
+      this.rollSrc.connect(this.rollFilter).connect(this.rollGain).connect(this.master);
+      this.rollSrc.start();
+    }
+    const t = ctx.currentTime;
+    const v = this.muted ? 0 : Math.max(0, Math.min(1, level));
+    this.rollGain!.gain.setTargetAtTime(v * 0.55, t, 0.05);
+    this.rollFilter!.frequency.setTargetAtTime(300 + v * 1400, t, 0.08);
+  }
+
   land(): void {
     this.noise(0.08, 0.6, 2500);
     this.tone(160, 0.15, 'sine', 0.15);

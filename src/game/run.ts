@@ -1,15 +1,18 @@
 import {
-  BALLS, BASE_INTEREST, cursed, PLEIN_SHARE, TABLE_LIMITS, BRIBE_PRICE, BRIBE_PULL, BRIBE_RISK, canFuse, CONSUMABLES, DEBTS, FUSE_EXTRA, ITEMS, itemPrice, MAX_CONSUMABLES,
-  MAX_SLOTS, NEWS, OFFERS, POCKET_ITEMS, RARITY, RIVAL_NAMES, ROUNDS_PER_CYCLE, RULES, SHARK_FACTOR, START_KITS, START_SLOTS,
+  BALLS, BASE_INTEREST, cursed, PLEIN_SHARE, TABLE_LIMITS, BRIBE_PRICE, BRIBE_PULL, canFuse, CONSUMABLES, DEBTS, FUSE_EXTRA, ITEMS, itemPrice, MAX_CONSUMABLES,
+  MAX_POCKET_LVL, MAX_SLOTS, NEWS, POCKET_ITEMS, RARITY, RIVAL_NAMES, ROUNDS_PER_CYCLE, RULES, SHARK_FACTOR, START_KITS, START_SLOTS,
   type PocketToolId, type RuleId,
 } from './content';
 import { FIELD_BY_ID, fieldWins, isInsideCombo } from './fields';
+import {
+  BONUS_SEGMENTS, BOSS_DUEL_DISCOUNT, CARDS, CAUGHT_PENALTY, MAX_SPECIAL, SKIP_DRAFT_MARKS, SPECIAL_CHIPS, SUSPICION,
+} from './extras';
 import { Rng } from './rng';
 import {
   activeItems, activeSets, hasSet, levelOf, luckOf, neighborIndices, noBoost, pocketWeights, scoreSpin, stakeOf, type Boost, type Perks,
-  type Line, type SpinResult,
+  type Line, type PlacedSpecial, type SpinResult,
 } from './scoring';
-import type { Bets, Color, ItemInstance, Pocket, ShopItem } from './types';
+import type { Bets, Color, ItemInstance, Pocket, PocketModId, ShopItem, SpecialChip } from './types';
 import { standardColor, WHEEL_ORDER } from './wheel';
 
 export const RUSH_SECONDS = 15;
@@ -82,6 +85,12 @@ export interface RunStats {
   duelLosses: number;
   sharkRepaid: number;
   smokes: number;
+  bonusSpins: number;
+  bestRide: number;
+  doubleHits: number;
+  caught: number;
+  nudges: number;
+  bossDuels: number;
 }
 
 export class Run {
@@ -108,8 +117,39 @@ export class Run {
   /** Adjustments that land on the next rate. */
   nextDebtFactor = 1;
   nextDebtAdd = 0;
-  /** Deals offered by the phone; empty when it is not ringing. */
-  offers: string[] = [];
+  /** Cards to pick from after paying a rate (the Baron's offer); empty when there is no draft. */
+  draft: string[] = [];
+  /** The chip case: special chips owned, and where they lie this spin (uid -> field). */
+  chips: SpecialChip[] = [];
+  placed: Record<number, string> = {};
+  /** Special chips already played this rate: each one works once per rate and is back after paying. */
+  usedChips = new Set<number>();
+  /** Free wheel upgrade from a card, waiting for a pocket. */
+  freeTool?: PocketToolId;
+  /** Let-it-ride ladder: current step (0 = not riding) and extra mult per step. */
+  rideStep = 0;
+  ridePerStep = 0.25;
+  /** The bets on the felt are a ride of the last win. */
+  riding = false;
+  /** Double-ball spins left, and whether the next spin has two balls. */
+  doubleCharges = 0;
+  private nextDoubleAt: number;
+  /** Suspicion 0..100; the floor manager steps in at 100. */
+  suspicion = 0;
+  suspicionDecay = 1;
+  cheatMagnet = false;
+  magnetCost = 1;
+  /** How wide the green zone of the nudge is (0..1 of the bar). */
+  nudgeZone = 0.18;
+  /** Set when the floor manager caught you on the last action. */
+  caught = false;
+  /** Bonus wheel spins waiting, and the net win they multiply. */
+  bonusPending = 0;
+  bonusBase = 0;
+  /** Outside field the Baron blocks on this spin (final rate). */
+  blocked?: string;
+  bossWins = 0;
+  private cheatedThisSpin = false;
   /** Pockets shown by the crystal ball this round. */
   visions: number[] = [];
   /** Field twisted by the magic cube this round. */
@@ -153,6 +193,7 @@ export class Run {
     lossStreak: 0, maxLossStreak: 0, winStreak: 0, maxWinStreak: 0, renumbers: 0, maxItems: 0, loansRepaid: 0, earlyPays: 0,
     focusWins: 0, nearMisses: 0, repeats: 0, minCash: Infinity, hangups: 0, sameBetStreak: 0, bestSameBetStreak: 0,
     golds: 0, maxSets: 0, bribesOk: 0, bribesCaught: 0, riskWins: 0, duelWins: 0, duelLosses: 0, sharkRepaid: 0, smokes: 0,
+    bonusSpins: 0, bestRide: 0, doubleHits: 0, caught: 0, nudges: 0, bossDuels: 0,
   };
   private locked: Set<string>;
   private uid = 1;
@@ -168,6 +209,7 @@ export class Run {
     this.ball = opts.ball && BALLS[opts.ball] ? opts.ball : 'stahl';
     this.news = '';
     this.nextDuelAt = 4 + this.rng.int(3);
+    this.nextDoubleAt = 6 + this.rng.int(4);
     this.wheel = WHEEL_ORDER.map((n, index) => ({ index, number: n, color: standardColor(n) }));
     this.cash = kit.money;
     this.marks = kit.marks;
@@ -175,6 +217,8 @@ export class Run {
     this.perks.luck = (kit.luck ?? 0) - (this.stage >= 5 ? 1 : 0);
     if (this.stage >= 5) this.marks = 0;
     for (const id of kit.items ?? []) this.addItem(id);
+    // Every run starts with one chip in the case.
+    this.addChip(this.rng.pick(['glas', 'gold', 'feuer', 'blei']));
     this.nextRule = this.rollRule();
     this.startCycle();
   }
@@ -188,7 +232,13 @@ export class Run {
     const base = debtFor(this.cycle) * devil * voodoo * (this.stage >= 1 ? 1.25 : 1)
       * (hasSet(this.items, 'bank') ? 0.9 : 1) * (this.news === 'razzia' ? 0.8 : this.news === 'inflation' ? 1.2 : 1)
       * (this.cycle >= this.sharkFrom ? SHARK_FACTOR : 1);
-    return roundNice(base * this.debtFactor + this.debtAdd);
+    const boss = this.bossRate ? Math.pow(1 - BOSS_DUEL_DISCOUNT, this.bossWins) : 1;
+    return roundNice(base * this.debtFactor * boss + this.debtAdd);
+  }
+
+  /** The last rate: the Baron plays it himself. */
+  get bossRate(): boolean {
+    return this.cycle === DEBTS.length - 1;
   }
 
   /** Base rate before any modifiers, for explaining where the rate comes from. */
@@ -291,7 +341,7 @@ export class Run {
 
   private startCycle(): void {
     this.phase = 'betting';
-    this.rule = this.cycle > 0 ? this.nextRule : undefined;
+    this.rule = this.cycle > 0 && !this.bossRate ? this.nextRule : undefined;
     if (this.cycle > 0) this.nextRule = this.rollRule();
     const ids = Object.keys(NEWS).filter((id) => id !== this.news);
     this.news = this.rng.pick(ids);
@@ -299,18 +349,44 @@ export class Run {
       - (this.rule === 'geiz' && !this.has('sonnenbrille') ? 1 : 0) - (this.stage >= 4 ? 1 : 0));
     this.roundsLeft = this.cycleRounds;
     this.bets = {};
+    this.placed = {};
+    this.usedChips.clear();
+    this.rideFrom = undefined;
+    this.rideStep = 0;
+    this.riding = false;
     this.rerollCost = 1;
     this.bribesThisCycle = 0;
     this.bribed = false;
     this.rollShop();
     this.rollVisions();
     this.rollDuel();
+    this.rollDouble();
+  }
+
+  /** Now and then the croupier throws two balls. Charges from cards and the bonus wheel add more. */
+  private rollDouble(): void {
+    if (this.stats.spins + 1 >= this.nextDoubleAt && !this.doubleCharges) {
+      this.doubleCharges = 1;
+      this.nextDoubleAt = this.stats.spins + 14 + this.rng.int(7);
+    }
+  }
+
+  get doubleNext(): boolean {
+    return this.doubleCharges > 0;
   }
 
   /** Every 7–10 spins a regular sits down and challenges you for one spin. */
   private rollDuel(): void {
-    if (this.duel || this.stats.spins + 1 < this.nextDuelAt || this.phase !== 'betting') return;
     const outside = ['red', 'black', 'even', 'odd', 'low', 'high', 'doz0', 'doz1', 'doz2', 'col0', 'col1', 'col2'];
+    if (this.bossRate && this.phase === 'betting') {
+      // The Baron: he blocks one outside field and bets on another, every spin.
+      this.blocked = this.rng.pick(outside);
+      const fieldId = this.rng.pick(outside.filter((f) => f !== this.blocked));
+      this.duel = { name: 'Der Baron', fieldId, stake: Math.max(20, roundNice(this.debt * 0.25)) };
+      return;
+    }
+    this.blocked = undefined;
+    if (this.duel || this.stats.spins + 1 < this.nextDuelAt || this.phase !== 'betting') return;
     const fieldId = this.rng.chance(0.3) ? `n${this.rng.int(37)}` : this.rng.pick(outside);
     this.duel = { name: this.rng.pick(RIVAL_NAMES), fieldId, stake: Math.max(5, roundNice(this.debt * 0.3)) };
   }
@@ -334,6 +410,8 @@ export class Run {
     if (this.phase !== 'betting' || this.highRisk || value <= 0 || !FIELD_BY_ID[fieldId] || value > this.fieldRoom(fieldId)) return false;
     this.cash -= value;
     (this.bets[fieldId] ??= []).push(value);
+    this.riding = false;
+    this.rideFrom = undefined;
     return true;
   }
 
@@ -344,6 +422,7 @@ export class Run {
     if (!v) return 0;
     if (!stack.length) delete this.bets[fieldId];
     this.cash += v;
+    this.riding = false;
     return v;
   }
 
@@ -352,6 +431,7 @@ export class Run {
     this.setHighRisk(false);
     this.cash += this.stakeTotal;
     this.bets = {};
+    this.riding = false;
   }
 
   /** Places last round's bets again, as far as the cash allows. */
@@ -365,8 +445,15 @@ export class Run {
   }
 
   weights(): number[] {
-    const w = pocketWeights(this.wheel, this.bets, this.items, this.activeRule, { ball: this.ball, kreide: this.boost.kreide });
+    const w = pocketWeights(this.wheel, this.bets, this.items, this.activeRule, this.weightExtra);
     return this.bribed && this.stakeTotal > 0 ? this.pulled(w) : w;
+  }
+
+  private get weightExtra() {
+    return {
+      ball: this.ball, kreide: this.boost.kreide, cheatMagnet: this.cheatMagnet,
+      magnetFields: this.placedSpecials.filter((c) => c.def === 'magnet').map((c) => c.fieldId),
+    };
   }
 
   /** The croupier's nudge: pockets that pay more than the stake weigh more. */
@@ -430,10 +517,21 @@ export class Run {
       if (r.anyWin) pWin += fin[i];
       back += fin[i] * (r.payout + (r.anyWin && this.highRisk ? this.riskRefund : 0));
     });
+    // A second ball adds its own wins (roughly: it lands like the first one, without hops).
+    if (this.doubleNext && this.stakeTotal > 0) {
+      const land = this.chances();
+      let p2 = 0;
+      results.forEach((r, i) => {
+        if (!r.anyWin) return;
+        p2 += land[i];
+        back += land[i] * r.payout;
+      });
+      pWin = 1 - (1 - pWin) * (1 - p2);
+    }
     // What the croupier's nudge is worth (landing only), for pricing the bribe.
     let bribeGain = 0;
     if (this.stakeTotal > 0) {
-      const plain = pocketWeights(this.wheel, this.bets, this.items, this.activeRule, { ball: this.ball, kreide: this.boost.kreide });
+      const plain = pocketWeights(this.wheel, this.bets, this.items, this.activeRule, this.weightExtra);
       const a = this.landing(plain);
       const b = this.landing(this.pulled(plain));
       results.forEach((r, i) => (bribeGain += (b[i] - a[i]) * r.payout));
@@ -454,7 +552,13 @@ export class Run {
       moneyBefore: this.moneyBefore, perks: this.perks, cubeField: this.cubeField,
       lastNumber: this.history[0]?.n, lossStreak: this.stats.lossStreak, winStreak: this.stats.winStreak, sameBets: this.sameAsLast(),
       news: this.news, ball: this.ball, boost: this.boost, highRisk: this.highRisk,
+      specials: this.placedSpecials, rideStep: this.rideStep, rideBonus: this.riding ? this.rideStep * this.ridePerStep : 0, blocked: this.blocked,
     };
+  }
+
+  /** Special chips on the felt this spin. */
+  get placedSpecials(): PlacedSpecial[] {
+    return this.chips.filter((c) => this.placed[c.uid] && this.bets[this.placed[c.uid]]).map((c) => ({ uid: c.uid, def: c.def, fieldId: this.placed[c.uid] }));
   }
 
   /** Whether the current bets are exactly last round's bets. */
@@ -467,13 +571,20 @@ export class Run {
   /** Resolves the spin immediately; the renderer animates towards `result.pocket`. */
   spin(): SpinResult {
     if (this.phase !== 'betting') throw new Error('not betting');
-    // A bribe may be spotted by the floor manager: the money is gone and the rate goes up.
     this.bribeCaught = false;
     this.bribePaid = 0;
+    this.caught = false;
     // High risk only counts on the last spin (an espresso may have added one).
     if (this.highRisk && this.roundsLeft !== 1) this.setHighRisk(false);
     // Nothing on the table: nothing to nudge, nothing to pay.
-    if (this.stakeTotal === 0) this.bribed = false;
+    if (this.stakeTotal === 0) {
+      this.bribed = false;
+      this.cheatMagnet = false;
+    }
+    // Changing the ride's bets ends the ride.
+    if (!this.riding) this.rideStep = 0;
+    // Chips only count where there is a bet.
+    for (const [uid, fid] of Object.entries(this.placed)) if (!this.bets[fid]) delete this.placed[Number(uid)];
     if (this.bribed) {
       const price = this.bribePrice;
       if (this.cash < price) {
@@ -482,26 +593,17 @@ export class Run {
         this.cash -= price;
         this.bribePaid = price;
         this.bribesThisCycle++;
-      }
-    }
-    if (this.bribed) {
-      const risk = this.news === 'streik' ? 0 : BRIBE_RISK * this.bribesThisCycle;
-      if (this.rng.chance(risk)) {
-        this.bribed = false;
-        this.bribeCaught = true;
-        this.debtAdd += roundNice(this.debt * 0.2);
-        this.stats.bribesCaught++;
-      } else {
         this.stats.bribesOk++;
       }
     }
+    // Cheating raises suspicion; at 100 the floor manager steps in before the ball is thrown.
+    this.cheatedThisSpin = this.bribed || this.cheatMagnet;
+    if (this.bribed) this.suspicion += this.bribeSuspicion;
+    if (this.cheatMagnet) this.suspicion += Math.round(SUSPICION.magnet * this.magnetCost);
+    if (this.suspicion >= 100) this.getCaught();
     const w = this.weights();
-    let index: number;
-    if (this.visions.length && this.rng.chance(0.4)) {
-      index = this.visions[this.rng.weighted(this.visions.map((i) => w[i]))];
-    } else {
-      index = this.rng.weighted(w);
-    }
+    const pick = () => (this.visions.length && this.rng.chance(0.4) ? this.visions[this.rng.weighted(this.visions.map((i) => w[i]))] : this.rng.weighted(w));
+    const index = pick();
     const input = this.input(this.roundsLeft === 1);
     let result = scoreSpin(input, index);
     // Luck: the ball may hop over a separator into a pocket that pays more.
@@ -512,9 +614,61 @@ export class Run {
       const to = this.voodooTurn && this.rng.chance(this.voodooTurn) ? t.worst : t.best;
       if (to !== index) result = { ...scoreSpin(input, to), hop: { from: index, to } };
     }
+    // Two balls: the second one rolls with the same odds and pays on its own.
+    if (this.doubleCharges > 0) {
+      this.doubleCharges--;
+      result.second = scoreSpin(input, pick());
+    }
     this.phase = 'spinning';
     this.lastResult = result;
     return result;
+  }
+
+  /** The floor manager saw it: the bets on the felt are confiscated and the rate goes up. */
+  private getCaught(): void {
+    this.caught = true;
+    this.bribeCaught = this.bribed;
+    this.bribed = false;
+    this.cheatMagnet = false;
+    this.bets = {};
+    this.placed = {};
+    this.debtAdd += roundNice(this.debt * CAUGHT_PENALTY);
+    this.suspicion = SUSPICION.afterCaught;
+    this.stats.bribesCaught++;
+    this.stats.caught++;
+  }
+
+  /** Total money a result pays back, both balls included. */
+  static totalPayout(r: SpinResult): number {
+    const s = r.second;
+    if (!s) return r.payout;
+    // With two balls refunds only count when neither ball won anything.
+    if (!r.anyWin && !s.anyWin) return r.payout;
+    const both = (r.anyWin ? r.payout : 0) + (s.anyWin ? s.payout : 0);
+    return r.doubleHit ? Math.floor(both * 1.5) : both;
+  }
+
+  // ---- Nudging the ball (a cheat with a timing press) ----------------------------------
+
+  /**
+   * The player pressed at `quality` (0 = dead centre of the green zone, 1 = far off). A good press
+   * moves the ball into the best neighbouring pocket; a bad one only raises suspicion.
+   */
+  nudge(offCentre: number): { ok: boolean; to?: number } {
+    const r = this.lastResult;
+    if (!r || this.phase !== 'spinning' || r.hop) return { ok: false };
+    this.stats.nudges++;
+    this.cheatedThisSpin = true;
+    const ok = offCentre <= this.nudgeZone / 2;
+    this.suspicion += ok ? SUSPICION.nudgeGood : SUSPICION.nudgeBad;
+    if (!ok) return { ok: false };
+    const input = this.input(this.roundsLeft === 1);
+    const from = r.pocket.index;
+    const pay = this.wheel.map((_, i) => (neighborIndices(from, 1).includes(i) || i === from ? scoreSpin(input, i).payout : -1));
+    const t = this.hopTargets(from, pay);
+    if (t.best === from) return { ok: true };
+    this.lastResult = { ...scoreSpin(input, t.best), hop: { from, to: t.best }, second: r.second };
+    return { ok: true, to: t.best };
   }
 
   /** Set by `spin` when the floor manager saw the bribe, and what was paid. */
@@ -530,15 +684,25 @@ export class Run {
   settle(): void {
     const r = this.lastResult;
     if (!r || this.phase !== 'spinning') return;
-    this.cash += r.payout;
-    this.marks += r.marks;
+    // Both balls on a bet you made: the double hit pays half again.
+    if (r.second) r.doubleHit = r.bets.some((b) => b.won && r.second!.bets.some((c) => c.won && c.fieldId === b.fieldId));
+    if (r.doubleHit) this.stats.doubleHits++;
+    const total = Run.totalPayout(r);
+    this.cash += total;
+    this.marks += r.marks + (r.second?.marks ?? 0);
     for (const t of this.items) t.counter += r.growth[t.uid] ?? 0;
+    // Glass chips whose field lost are gone.
+    // With two balls a glass chip only breaks when its field lost on both.
+    const broken = new Set(r.broken.filter((u) => !r.second || r.second.broken.includes(u)));
+    if (broken.size) this.chips = this.chips.filter((c) => !broken.has(c.uid));
+    this.lastBroken = [...broken];
     this.lastInterest = Math.floor(this.deposit * this.interestRate);
     this.deposit += this.lastInterest;
     this.history.unshift({ n: r.pocket.number, c: r.pocket.color });
+    if (r.second) this.history.unshift({ n: r.second.pocket.number, c: r.second.pocket.color });
     this.history.length = Math.min(this.history.length, 12);
     const same = this.sameAsLast();
-    this.trackStats(r, same);
+    this.trackStats(r, same, total);
     const riskIn = this.riskStake;
     const riskBack = this.highRisk && r.anyWin ? this.riskRefund : 0;
     if (this.highRisk) {
@@ -547,9 +711,31 @@ export class Run {
       this.highRisk = false;
       this.riskStake = 0;
     }
-    this.settleDuel(r, riskBack - riskIn);
+    this.settleDuel(r, riskBack - riskIn + total - r.payout);
+    // Let-it-ride: what this spin won per field, for riding it on the next spin.
+    const net = total - r.stake;
+    this.rideFrom = net > 0 ? this.winningStacks(r) : undefined;
+    if (this.rideStep > 0) {
+      this.stats.bestRide = Math.max(this.stats.bestRide, net > 0 ? this.rideStep : 0);
+      if (net <= 0 || this.rideStep >= 3) {
+        // The top of the ladder pays a bonus wheel spin, and you have to cash out.
+        if (net > 0 && this.rideStep >= 3) this.bonusPending++;
+        this.rideFrom = this.rideStep >= 3 ? undefined : this.rideFrom;
+        if (net <= 0) this.rideStep = 0;
+      }
+    }
+    // Bonus wheel spins, multiplying this spin's net win.
+    this.bonusPending += r.bonus + (r.second?.bonus ?? 0);
+    if (this.bonusPending) this.bonusBase = Math.max(0, net);
+    // Suspicion cools off on honest spins.
+    if (!this.cheatedThisSpin) this.suspicion = Math.max(0, this.suspicion - SUSPICION.decay * this.suspicionDecay);
+    this.suspicion = Math.min(100, this.suspicion);
+    this.cheatMagnet = false;
+    this.riding = false;
+    for (const uid of Object.keys(this.placed)) if (this.bets[this.placed[Number(uid)]]) this.usedChips.add(Number(uid));
     this.lastBets = this.bets;
     this.bets = {};
+    this.placed = {};
     this.boost = noBoost();
     this.bribed = false;
     this.roundsLeft--;
@@ -557,12 +743,15 @@ export class Run {
       this.phase = 'betting';
       this.rollVisions();
       this.rollDuel();
+      this.rollDouble();
       // Broke in the middle of a rate: the loan shark shows up once.
       if (this.cash < 1 && this.deposit < this.debt && !this.sharkUsed) {
         this.phase = 'shark';
         this.sharkDue = false;
       }
     } else {
+      this.rideFrom = undefined;
+      this.rideStep = 0;
       this.phase = 'due';
       if (this.cash + this.deposit < this.debt) {
         if (!this.sharkUsed) {
@@ -573,6 +762,133 @@ export class Run {
         }
       }
     }
+  }
+
+  /** Glass chips that broke on the last spin. */
+  lastBroken: number[] = [];
+
+  // ---- Let it ride ---------------------------------------------------------------
+
+  /** Stacks the last win would put back on the felt (field -> amount), if riding is possible. */
+  rideFrom?: Record<string, number>;
+
+  private winningStacks(r: SpinResult): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const b of r.bets) if (b.won) out[b.fieldId] = (out[b.fieldId] ?? 0) + b.amount;
+    return out;
+  }
+
+  get canRide(): boolean {
+    return this.phase === 'betting' && !!this.rideFrom && this.stakeTotal === 0 && this.rideStep < 3
+      && Object.values(this.rideFrom).reduce((a, b) => a + b, 0) <= this.cash;
+  }
+
+  /** What riding would put on the felt. */
+  get rideTotal(): number {
+    return this.rideFrom ? Object.values(this.rideFrom).reduce((a, b) => a + b, 0) : 0;
+  }
+
+  /** Leaves the winnings on their fields for the next spin, past the table limit, one step up the ladder. */
+  letItRide(): boolean {
+    if (!this.canRide || !this.rideFrom) return false;
+    for (const [fid, v] of Object.entries(this.rideFrom)) {
+      this.cash -= v;
+      this.bets[fid] = [v];
+    }
+    this.rideStep++;
+    this.riding = true;
+    this.rideFrom = undefined;
+    return true;
+  }
+
+  /** Takes the money: the ladder starts from the bottom again. */
+  cashOut(): void {
+    this.rideFrom = undefined;
+    this.rideStep = 0;
+  }
+
+  // ---- Bonus wheel -------------------------------------------------------------------
+
+  /** Spins the bonus wheel once: returns the segment index and a message. */
+  spinBonus(): { index: number; text: string } | undefined {
+    if (this.bonusPending <= 0) return undefined;
+    this.bonusPending--;
+    this.stats.bonusSpins++;
+    const index = this.rng.weighted(BONUS_SEGMENTS.map((b) => b.weight));
+    const seg = BONUS_SEGMENTS[index];
+    const base = this.bonusBase > 0 ? this.bonusBase : roundNice(this.debt * 0.05);
+    let text = seg.desc;
+    const times = seg.id.startsWith('x') ? Number(seg.id.slice(1)) : 0;
+    if (times) {
+      const add = base * (times - 1);
+      this.cash += add;
+      text = `+$${add}`;
+    } else {
+      switch (seg.id) {
+        case 'marken3': this.marks += 3; break;
+        case 'marken5': this.marks += 5; break;
+        case 'jeton': {
+          const def = this.randomChipDef();
+          if (this.addChip(def)) text = `${SPECIAL_CHIPS[def].name} im Etui.`;
+          else { this.marks += 2; text = 'Das Etui ist voll: +◆2.'; }
+          break;
+        }
+        case 'doppel': this.doubleCharges += 1; break;
+        case 'rabatt': this.debtFactor *= 0.8; break;
+        case 'ruhe': this.suspicion = 0; break;
+        case 'fach': {
+          const mods: PocketModId[] = ['gold', 'kristall', 'flamme', 'doppel', 'stern'];
+          const mod = this.rng.pick(mods);
+          const free = this.wheel.filter((q) => !q.mod || q.mod === mod);
+          const q = this.rng.pick(free.length ? free : this.wheel);
+          this.upgradePocket(q, mod);
+          text = `Fach ${q.number}: ${POCKET_ITEMS[mod].name}${(q.lvl ?? 1) > 1 ? ` Stufe ${q.lvl}` : ''}.`;
+          break;
+        }
+      }
+    }
+    if (this.bonusPending === 0) this.bonusBase = 0;
+    return { index, text };
+  }
+
+  // ---- The chip case ---------------------------------------------------------------
+
+  randomChipDef(): string {
+    const defs = Object.values(SPECIAL_CHIPS);
+    const w = defs.map((d) => (d.rarity === 'common' ? 4 : d.rarity === 'rare' ? 2 : 0.6));
+    return defs[this.rng.weighted(w)].id;
+  }
+
+  addChip(def: string): boolean {
+    if (this.chips.length >= MAX_SPECIAL || !SPECIAL_CHIPS[def]) return false;
+    this.chips.push({ uid: this.uid++, def });
+    return true;
+  }
+
+  /** Puts a special chip on a field that carries a bet, or takes it back when it lies there already. */
+  placeSpecial(uid: number, fieldId: string): boolean {
+    if (this.phase !== 'betting' || !this.chips.some((c) => c.uid === uid) || this.usedChips.has(uid)) return false;
+    if (this.placed[uid] === fieldId) {
+      delete this.placed[uid];
+      return true;
+    }
+    if (!this.bets[fieldId]) return false;
+    this.placed[uid] = fieldId;
+    return true;
+  }
+
+  removeSpecial(uid: number): void {
+    delete this.placed[uid];
+  }
+
+  // ---- Cheating ---------------------------------------------------------------------
+
+  /** The magnet under the table for the next spin: pleins pull the ball, suspicion rises. */
+  toggleMagnet(): boolean {
+    if (this.phase !== 'betting') return false;
+    if (!this.cheatMagnet && !Object.keys(this.bets).some((f) => FIELD_BY_ID[f].kind === 'straight')) return false;
+    this.cheatMagnet = !this.cheatMagnet;
+    return true;
   }
 
   private settleDuel(r: SpinResult, riskNet: number): void {
@@ -588,14 +904,20 @@ export class Run {
     d.rivalNet = rivalNet;
     d.playerNet = playerNet;
     // Sitting the duel out counts as losing it.
+    const boss = d.name === 'Der Baron';
     if (r.stake > 0 && playerNet > rivalNet) {
       d.outcome = 'won';
-      this.marks += 3;
-      this.cash += d.stake;
+      if (boss) {
+        this.bossWins++;
+        this.stats.bossDuels++;
+      } else {
+        this.marks += 3;
+        this.cash += d.stake;
+      }
       this.stats.duelWins++;
     } else if (r.stake === 0 || playerNet < rivalNet) {
       d.outcome = 'lost';
-      this.debtAdd += roundNice(this.debt * 0.15);
+      if (!boss) this.debtAdd += roundNice(this.debt * 0.15);
       this.stats.duelLosses++;
     } else {
       d.outcome = 'tie';
@@ -693,9 +1015,9 @@ export class Run {
     return g;
   }
 
-  /** Chance that the next bribe is seen. */
-  get bribeRisk(): number {
-    return this.news === 'streik' ? 0 : BRIBE_RISK * (this.bribesThisCycle + 1);
+  /** Suspicion a bribe adds (the strike news makes croupiers look away). */
+  get bribeSuspicion(): number {
+    return this.news === 'streik' ? 0 : SUSPICION.bribe;
   }
 
   /** Tips the croupier for the next spin; he is paid when the ball is thrown. Calling again takes it back. */
@@ -729,7 +1051,7 @@ export class Run {
     return true;
   }
 
-  private trackStats(r: SpinResult, same: boolean): void {
+  private trackStats(r: SpinResult, same: boolean, total = r.payout): void {
     const s = this.stats;
     if (r.anyWin && r.bets.length === 1) s.focusWins++;
     s.nearMisses += r.nearMiss.length;
@@ -737,7 +1059,7 @@ export class Run {
     s.minCash = Math.min(s.minCash, this.cash);
     s.sameBetStreak = same ? s.sameBetStreak + 1 : 0;
     s.bestSameBetStreak = Math.max(s.bestSameBetStreak, s.sameBetStreak);
-    const won = r.payout - r.stake;
+    const won = total - r.stake;
     s.spins++;
     if (won > 0) s.totalWon += won;
     s.bestWin = Math.max(s.bestWin, won);
@@ -748,7 +1070,8 @@ export class Run {
     if (r.pocket.number === 0 && winners.length) s.zeroHits++;
     if (r.hop) s.hops++;
     s.maxSets = Math.max(s.maxSets, activeSets(this.items).length);
-    s.lossStreak = r.stake > 0 && !r.anyWin ? s.lossStreak + 1 : r.anyWin ? 0 : s.lossStreak;
+    const any = r.anyWin || !!r.second?.anyWin;
+    s.lossStreak = r.stake > 0 && !any ? s.lossStreak + 1 : any ? 0 : s.lossStreak;
     s.maxLossStreak = Math.max(s.maxLossStreak, s.lossStreak);
     if (r.stake > 0) s.winStreak = won > 0 ? s.winStreak + 1 : 0;
     s.maxWinStreak = Math.max(s.maxWinStreak, s.winStreak);
@@ -825,8 +1148,10 @@ export class Run {
     this.debtAdd = this.nextDebtAdd;
     this.nextDebtFactor = 1;
     this.nextDebtAdd = 0;
+    this.suspicion = Math.max(0, this.suspicion - SUSPICION.payDecay * this.suspicionDecay);
+    this.bossWins = 0;
     this.startCycle();
-    this.offers = this.rollOffers();
+    this.draft = won ? [] : this.rollDraft();
     if (won) this.phase = 'victory';
     return true;
   }
@@ -836,39 +1161,60 @@ export class Run {
     if (this.phase === 'victory') this.phase = 'betting';
   }
 
-  // ---- The phone ------------------------------------------------------------
+  // ---- The card draft after every paid rate -------------------------------------------
 
-  private rollOffers(): string[] {
-    const pool = Object.values(OFFERS).filter((o) => !(o.id === 'platz' && this.perks.slots >= MAX_SLOTS));
+  private rollDraft(): string[] {
+    const pool = Object.values(CARDS).filter((c) => !(c.id === 'platz' && this.perks.slots >= MAX_SLOTS)
+      && !(c.kind === 'jeton' && this.chips.length >= MAX_SPECIAL) && !(c.id === 'leiter' && this.ridePerStep >= 1));
+    const weight = (c: (typeof pool)[number]) => c.weight * (c.rarity === 'legendary' ? 0.5 : 1);
     const out: string[] = [];
+    // Always at least one chip or wheel card, so the build keeps growing.
+    const growth = pool.filter((c) => c.kind === 'jeton' || c.kind === 'rad');
+    if (growth.length) out.push(growth[this.rng.weighted(growth.map(weight))].id);
     while (out.length < 3) {
-      const rest = pool.filter((o) => !out.includes(o.id));
-      out.push(rest[this.rng.weighted(rest.map((o) => o.weight))].id);
+      const rest = pool.filter((c) => !out.includes(c.id));
+      out.push(rest[this.rng.weighted(rest.map(weight))].id);
     }
-    return out;
+    return this.rng.shuffle(out);
   }
 
-  /** Hangs up on the boss. */
-  declineOffers(): void {
-    if (!this.offers.length) return;
-    this.offers = [];
+  /** Turns the whole draft down for a couple of marks. */
+  skipDraft(): void {
+    if (!this.draft.length) return;
+    this.draft = [];
+    this.marks += SKIP_DRAFT_MARKS;
     this.stats.hangups++;
   }
 
-  /** Accepts one of the phone deals. Returns a message for the player. */
-  chooseOffer(i: number): string | undefined {
-    const id = this.offers[i];
+  /** Takes one of the three cards. Returns a message for the player. */
+  chooseCard(i: number): string | undefined {
+    const id = this.draft[i];
     if (!id) return undefined;
-    this.offers = [];
+    this.draft = [];
     const p = this.perks;
+    if (id.startsWith('j_')) {
+      const def = id.slice(2);
+      return this.addChip(def) ? `${SPECIAL_CHIPS[def].name} liegt jetzt in deinem Etui.` : 'Das Etui ist voll.';
+    }
+    if (id.startsWith('r_')) {
+      this.freeTool = id.slice(2) as PocketToolId;
+      return 'Wähl das Fach am Rad.';
+    }
     switch (id) {
       case 'glueck': p.luck++; return 'Glück +1.';
-      case 'vip': p.vip = (p.vip ?? 0) + 1; return `Der Saalchef nickt: Tischlimit jetzt $${this.tableMax}.`;
+      case 'vip': p.vip = (p.vip ?? 0) + 1; return `Tischlimit jetzt $${this.tableMax}.`;
       case 'zinsen': p.interest += 0.03; return 'Deine Einzahlung bringt jetzt 3 % mehr Zinsen.';
       case 'platz': p.slots = Math.min(MAX_SLOTS, p.slots + 1); return 'Auf dem Tisch ist Platz für einen weiteren Talisman.';
       case 'marken': this.marks += 4; return '+4 Glücksmarken.';
       case 'runde': p.extraRounds++; this.roundsLeft++; this.cycleRounds++; return 'Ab sofort ein Dreh mehr vor jeder Rate.';
-      case 'kredit': {
+      case 'rotplus': p.redMult += 0.5; return 'Rot zahlt ab sofort +0,5 Mult.';
+      case 'schwarzplus': p.blackMult += 0.5; return 'Schwarz zahlt ab sofort +0,5 Mult.';
+      case 'leiter': this.ridePerStep += 0.25; return `Jede Stufe der Leiter bringt jetzt +${String(this.ridePerStep).replace('.', ',')} Mult.`;
+      case 'k_doppel': this.doubleCharges += 2; return 'Die nächsten 2 Drehs rollen zwei Kugeln.';
+      case 's_magnet': this.magnetCost = 0.5; return 'Der Magnet macht nur noch halb so viel Verdacht.';
+      case 's_finger': this.nudgeZone = Math.min(0.4, this.nudgeZone + 0.1); return 'Die grüne Zone beim Anstoßen ist größer.';
+      case 's_ruhe': this.suspicion = 0; this.suspicionDecay = 2; return 'Niemand verdächtigt dich. Und das bleibt eine Weile so.';
+      case 'b_umschlag': {
         const amount = roundNice(this.debt / 2);
         this.cash += amount;
         const extra = Math.round(amount * 1.5);
@@ -876,21 +1222,26 @@ export class Run {
         this.loanRunning = true;
         return `+$${amount}. Die Rate steigt um $${extra}.`;
       }
-      case 'stundung':
+      case 'b_stundung':
         this.debtFactor *= 0.7;
         this.nextDebtFactor *= 1.15;
         return 'Diese Rate ist 30 % niedriger. Die nächste wird 15 % teurer.';
-      case 'rotplus': p.redMult += 0.5; return 'Rot zahlt ab sofort +0,5 Mult.';
-      case 'schwarzplus': p.blackMult += 0.5; return 'Schwarz zahlt ab sofort +0,5 Mult.';
-      case 'goldfach':
-      case 'kristallfach': {
-        const free = this.wheel.filter((q) => !q.mod);
-        const q = this.rng.pick(free.length ? free : this.wheel);
-        q.mod = id === 'goldfach' ? 'gold' : 'kristall';
-        return `Fach ${q.number} ist jetzt ein ${id === 'goldfach' ? 'Gold' : 'Kristall'}fach.`;
-      }
+      case 'b_auftrag':
+        this.marks += 6;
+        this.suspicion = Math.min(99, this.suspicion + 40);
+        return '+6 Glücksmarken. Der Saalchef schaut jetzt genauer hin.';
     }
     return undefined;
+  }
+
+  /** Places the free wheel upgrade from a card. */
+  applyFreeTool(pocketIndex: number, newNumber?: number): boolean {
+    const id = this.freeTool;
+    const p = this.wheel[pocketIndex];
+    if (!id || !p) return false;
+    if (!this.applyTool(id, p, newNumber)) return false;
+    this.freeTool = undefined;
+    return true;
   }
 
   // ---- Showcase (shop, paid with lucky marks) --------------------------------
@@ -971,8 +1322,13 @@ export class Run {
     if (!this.canBuy(i) || this.shop[i].kind !== 'pocket') return false;
     const item = this.shop[i];
     const p = this.wheel[pocketIndex];
-    if (!p) return false;
-    const id = item.def as PocketToolId;
+    if (!p || !this.applyTool(item.def as PocketToolId, p, newNumber)) return false;
+    this.marks -= item.price;
+    item.sold = true;
+    return true;
+  }
+
+  private applyTool(id: PocketToolId, p: Pocket, newNumber?: number): boolean {
     if (id === 'pinsel') {
       if (newNumber === undefined || newNumber < 0 || newNumber > 36) return false;
       p.number = newNumber;
@@ -980,12 +1336,29 @@ export class Run {
       this.stats.renumbers++;
     } else if (id === 'farbe') {
       p.color = p.color === 'red' ? 'black' : 'red';
+    } else if (id === 'kopie') {
+      // Both neighbours become copies: the wheel gets thinner, your number more likely.
+      for (const j of neighborIndices(p.index)) {
+        const q = this.wheel[j];
+        q.number = p.number;
+        q.color = p.color;
+        q.mod = p.mod;
+        q.lvl = p.lvl;
+      }
+      this.stats.renumbers++;
     } else {
-      p.mod = id;
+      this.upgradePocket(p, id);
     }
-    this.marks -= item.price;
-    item.sold = true;
     return true;
+  }
+
+  /** Gives a pocket an effect, or raises the level of the one it has. */
+  private upgradePocket(p: Pocket, mod: PocketModId): void {
+    if (p.mod === mod) p.lvl = Math.min(MAX_POCKET_LVL, (p.lvl ?? 1) + 1);
+    else {
+      p.mod = mod;
+      p.lvl = 1;
+    }
   }
 
   sellPrice(uid: number): number {
