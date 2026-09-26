@@ -9,14 +9,13 @@ import { Input } from './input';
 import { $, fmt, fmtMult } from './ui/dom';
 import {
   availableChips, bigWin, bump, closeModal, coveredCells, floater, hideOsd, modalOpen, navModal, openModal, renderFieldInfo,
-  renderItemTip, renderOsd, renderScore, renderSlip, renderTableBar, setBanner, setHelp, setPrompt, toast, type ScoreState,
+  renderItemTip, renderOsd, renderShopTip, renderScore, renderSlip, renderTableBar, setBanner, setHelp, setPrompt, toast, type ScoreState,
 } from './ui/hud';
 import {
   automatView, collectionView, controlsView, gameOverView, kasseView, overviewView, pauseView, phoneView, sharkView, startView, victoryView,
-  vitrineView, wheelView,
+  ownedView, wheelView,
 } from './ui/screens';
 import { renderGoal } from './ui/guide';
-import { ItemPreview } from './world/preview';
 import { World } from './world/world';
 
 type Mode = 'start' | 'room' | 'table' | 'spinning' | 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'shark' | 'caught' | 'over';
@@ -40,7 +39,6 @@ export class Game {
   private osdDirty = true;
   private tape = 0;
   private osdSecond = -1;
-  private preview = new ItemPreview();
   private seq: { delay: number; fn: () => void }[] = [];
   private seqWait = 0;
   private spinStage: 'rolling' | 'scoring' = 'rolling';
@@ -94,7 +92,7 @@ export class Game {
     'KLICK AUF EIN FELD, UM DEN GEWÄHLTEN JETON ZU SETZEN. RECHTS STEHEN QUOTEN, CHANCEN UND DAS TISCHLIMIT.',
     '<kbd>LEER</kbd> DREHT DAS RAD. GEWINN = SUMME × MULT.',
     'DER BALKEN OBEN ZEIGT DEINE RATE. NACH 3 DREHS WIRD SIE FÄLLIG – ZAHL AN DER KASSE HINTER DEM TISCH.',
-    'DIE VITRINE NEBEN DEM RAD VERKAUFT TALISMANE FÜR GLÜCKSMARKEN ◆. SIE ERHÖHEN DEN MULT – OHNE SIE GEWINNT DAS HAUS.',
+    'DIE VITRINE GEGENÜBER DEM TISCH (DREH DICH UM) VERKAUFT TALISMANE FÜR GLÜCKSMARKEN ◆. ZEIG DRAUF, KLICK KAUFT.',
   ];
 
   /** Shows the current tutorial hint, if any. */
@@ -158,6 +156,10 @@ export class Game {
       if (this.mode === 'room' && !modalOpen()) {
         this.dragLook = true;
         this.capturePointer();
+        return;
+      }
+      if (this.mode === 'vitrine' && !modalOpen()) {
+        if (e.button === 0) this.clickShop();
         return;
       }
       if (this.mode === 'table') {
@@ -281,7 +283,7 @@ export class Game {
     const r = this.run;
     this.chanceCache = undefined;
     this.world.setItems(r.items, r.perks.slots);
-    this.world.setShowcase(r.shop);
+    this.world.setShowcase(r.shop, (i) => r.canBuy(i));
     this.world.refreshWheel(r.wheel, undefined, r.visions);
     this.world.markCells = new Set(r.visions.map((i) => `n${r.wheel[i].number}`));
     this.world.setMarquee(r.history, r.debt, r.round, r.cycleRounds);
@@ -454,51 +456,136 @@ export class Game {
     this.mode = 'vitrine';
     this.world.cameraMode = 'vitrine';
     this.world.standAt('vitrine');
+    this.releasePointer();
     setPrompt();
-    this.renderVitrine();
+    setHelp('');
+    this.renderShopBar();
   }
 
-  private renderVitrine(): void {
-    openModal(vitrineView(this.run, {
-      buy: (i) => {
-        const def = this.run.shop[i].def;
-        if (this.run.buy(i)) {
-          sfx.cash();
-          toast(`${ITEMS[def].name.toUpperCase()} STEHT JETZT AUF DEINEM TISCH.`);
-          this.afterShop();
-        }
-      },
-      target: (i) => this.useUpgrade(i),
-      reroll: () => {
-        if (this.run.reroll()) {
-          sfx.select();
-          this.afterShop();
-        }
-      },
+  /** The bar under the showcase: marks, reroll, your own talismans, back. */
+  private renderShopBar(): void {
+    const bar = $('shopbar');
+    bar.classList.remove('hidden');
+    const r = this.run;
+    const btn = (html: string, fn: () => void, disabled = false) => {
+      const b = document.createElement('button');
+      b.innerHTML = html;
+      b.disabled = disabled;
+      b.onclick = fn;
+      return b;
+    };
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.innerHTML = `KURIOSITÄTEN · <span class="marks">◆ ${r.marks} GLÜCKSMARKEN</span>`;
+    const hint = document.createElement('div');
+    hint.className = 'hintline';
+    hint.textContent = r.shop.some((x) => !x.sold) ? 'ZEIG MIT DER MAUS AUF EIN STÜCK – KLICK KAUFT ES' : 'AUSVERKAUFT – LASS NEU BESTÜCKEN';
+    const btns = document.createElement('div');
+    btns.className = 'btns';
+    btns.append(
+      btn(`<kbd>R</kbd> NEU BESTÜCKEN ◆${r.rerollCost}`, () => this.rerollShop(), r.marks < r.rerollCost || !r.cashierOpen),
+      btn(`<kbd>T</kbd> DEINE TALISMANE ${r.items.length}/${r.perks.slots}`, () => this.openOwned()),
+      btn('<kbd>ESC</kbd> ZURÜCK', () => this.closePanel()),
+    );
+    bar.replaceChildren(title, hint, btns);
+  }
+
+  private hideShop(): void {
+    $('shopbar').classList.add('hidden');
+    renderShopTip(this.run, undefined);
+    this.world.hoverShowcase = undefined;
+  }
+
+  private frameVitrine(presses: string[]): void {
+    this.world.movePlayer(0, new THREE.Vector2(), false);
+    for (const k of presses) {
+      if (k === 'Escape' || k === 'KeyE') {
+        this.closePanel();
+        return;
+      }
+      if (k === 'KeyR') this.rerollShop();
+      if (k === 'KeyT') {
+        this.openOwned();
+        return;
+      }
+    }
+    const i = this.mouse.x >= 0 ? this.world.pickShowcase(this.mouse.x, this.mouse.y) : undefined;
+    if (i !== this.world.hoverShowcase && i !== undefined) sfx.select();
+    this.world.hoverShowcase = i;
+    // The card sits still above the piece instead of chasing the pointer.
+    const at = i === undefined ? undefined : this.world.showcaseAnchor(i);
+    renderShopTip(this.run, at ? i : undefined, at?.x, at?.y);
+  }
+
+  private clickShop(): void {
+    const i = this.world.hoverShowcase;
+    if (i === undefined) return;
+    const it = this.run.shop[i];
+    if (!it || it.sold) return;
+    if (!this.run.canBuy(i)) {
+      sfx.error();
+      return;
+    }
+    if (it.kind !== 'item') {
+      renderShopTip(this.run, undefined);
+      this.useUpgrade(i);
+      return;
+    }
+    const gold = !!it.fuse;
+    if (this.run.buy(i)) {
+      sfx.cash();
+      toast(gold ? `${ITEMS[it.def].name.toUpperCase()} IST JETZT GOLDEN.` : `${ITEMS[it.def].name.toUpperCase()} STEHT JETZT AUF DEINEM TISCH.`);
+      this.world.hoverShowcase = undefined;
+      this.afterShop();
+    }
+  }
+
+  private rerollShop(): void {
+    if (!this.run.reroll()) {
+      sfx.error();
+      return;
+    }
+    sfx.select();
+    this.world.distort(0.3);
+    this.afterShop();
+  }
+
+  private openOwned(): void {
+    renderShopTip(this.run, undefined);
+    const back = () => {
+      closeModal();
+      this.renderShopBar();
+    };
+    openModal(ownedView(this.run, {
       sell: (uid) => {
         if (this.run.sellItem(uid)) {
           sfx.cash();
-          this.afterShop();
+          this.syncWorld();
+          this.openOwned();
         }
       },
       move: (uid, dir) => {
         if (this.run.moveItem(uid, dir)) {
           sfx.select();
-          this.afterShop();
+          this.syncWorld();
+          this.openOwned();
         }
       },
-      close: () => this.closePanel(),
-    }, this.preview), 'vcr', () => this.closePanel());
+      close: back,
+    }), 'vcr', back);
   }
 
   private afterShop(): void {
     this.syncWorld();
     this.checkUnlocks();
-    this.renderVitrine();
+    if (this.mode === 'vitrine') this.renderShopBar();
   }
 
   private useUpgrade(i: number): void {
-    openModal(wheelView(this.run, () => this.renderVitrine(), {
+    openModal(wheelView(this.run, () => {
+      closeModal();
+      this.renderShopBar();
+    }, {
       index: i,
       apply: (pocket, num) => {
         const before = this.run.wheel[pocket].number;
@@ -510,6 +597,7 @@ export class Game {
           toast(num !== undefined ? `FACH ${before} IST JETZT DIE ${p.number}.` : `${name.toUpperCase()}: FACH ${p.number}.`);
           setTimeout(() => this.world.refreshWheel(this.run.wheel, undefined, this.run.visions), 2500);
         }
+        closeModal();
         this.afterShop();
       },
     }), 'vcr');
@@ -540,6 +628,7 @@ export class Game {
 
   private closePanel(): void {
     closeModal();
+    this.hideShop();
     if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'phone' || this.mode === 'smokes') this.enterRoom();
   }
 
@@ -1002,7 +1091,10 @@ export class Game {
       if (this.overview && (presses.includes('Escape') || presses.includes('Tab'))) this.toggleOverview();
       else if (this.paused && (presses.includes('Escape') || presses.includes('KeyP'))) this.closePause();
       else if (presses.includes('Escape')) {
-        if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'phone' || this.mode === 'smokes') this.closePanel();
+        if (this.mode === 'vitrine') {
+          closeModal();
+          this.renderShopBar();
+        } else if (this.mode === 'kasse' || this.mode === 'phone' || this.mode === 'smokes') this.closePanel();
         else if (this.mode === 'room' || this.mode === 'table') closeModal();
         else if (this.mode === 'start') this.showStart();
       }
@@ -1014,6 +1106,7 @@ export class Game {
           else this.frameRoom(dt, presses);
           break;
         case 'table': this.frameTable(dt, presses); break;
+        case 'vitrine': this.frameVitrine(presses); break;
         case 'spinning': this.frameSpinning(dt, presses); break;
         case 'caught': this.frameCaught(dt); break;
         default: break;

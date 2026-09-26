@@ -1,8 +1,8 @@
-import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_MOD_INFO, RARITY, RULES, SETS, STAGES } from '../game/content';
+import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_ITEMS, POCKET_MOD_INFO, RARITY, RULES, SETS, STAGES, type PocketToolId } from '../game/content';
 import { FIELD_BY_ID, fieldWins, KIND_NAME } from '../game/fields';
 import type { Run } from '../game/run';
 import { streakBonus, type Line } from '../game/scoring';
-import { buildFocus } from './guide';
+import { buildFocus, fitReason } from './guide';
 import type { ItemInstance, Pocket } from '../game/types';
 import { COLOR_NAME, POCKET_COUNT, standardColor } from '../game/wheel';
 import { $, fmt, fmtMult, h } from './dom';
@@ -320,6 +320,50 @@ export function renderItemTip(run: Run, uid: number | undefined, x: number, y: n
   box.style.left = `${x}px`;
   box.style.top = `${y - 10}px`;
   box.classList.remove('hidden');
+}
+
+/** Tooltip over a showcase offer: what it is, what it does, why it fits, and whether you can take it. */
+export function renderShopTip(run: Run, index: number | undefined, x = 0, y = 0): void {
+  const box = $('shoptip');
+  const it = index === undefined ? undefined : run.shop[index];
+  if (!it || it.sold) {
+    box.classList.add('hidden');
+    return;
+  }
+  const rows: (HTMLElement | null)[] = [];
+  if (it.kind === 'item') {
+    const d = ITEMS[it.def];
+    rows.push(h('div', { class: 'r ' + rarityClass(it.def), text: RARITY[d.rarity].name + (it.fuse ? ' · MACHT DEINEN GOLDEN' : '') }));
+    rows.push(h('div', { class: 'name', text: (it.fuse ? '★ ' : '') + d.name }));
+    rows.push(h('div', { class: 'desc', text: (it.fuse ? GOLD_DESC[it.def] ?? d.desc : d.desc).replace(' (aktuell +{n})', '') }));
+    const set = setInfo(run, it.def);
+    if (set) rows.push(h('div', { class: 'set', text: set }));
+    const fit = fitReason(run, it.def);
+    if (fit) rows.push(h('div', { class: 'fit', text: '★ ' + fit }));
+  } else {
+    const p = POCKET_ITEMS[it.def as PocketToolId];
+    rows.push(h('div', { class: 'r', text: 'RAD-UMBAU' }));
+    rows.push(h('div', { class: 'name', text: p.name }));
+    rows.push(h('div', { class: 'desc', text: p.desc }));
+  }
+  const full = it.kind === 'item' && !it.fuse && run.items.length >= run.perks.slots;
+  const status = !run.cashierOpen ? 'GERADE GESCHLOSSEN'
+    : run.marks < it.price ? `ZU WENIG GLÜCKSMARKEN (◆${run.marks}/${it.price})`
+      : full ? 'DEIN TISCH IST VOLL – ERST EINEN VERKAUFEN (T)'
+        : it.kind === 'item' ? `◆${it.price} · KLICK ZUM KAUFEN` : `◆${it.price} · KLICK, DANN FACH WÄHLEN`;
+  rows.push(h('div', { class: 'buy' + (run.canBuy(index!) ? ' ok' : ''), text: status }));
+  const key = `${index}|${run.marks}|${run.items.length}|${it.price}`;
+  if (box.dataset.key !== key) {
+    box.dataset.key = key;
+    box.replaceChildren(...rows.filter((r): r is HTMLElement => !!r));
+  }
+  // The card sits beside the piece, never on top of it, and stays on screen.
+  box.classList.remove('hidden');
+  const w = box.offsetWidth, hgt = box.offsetHeight;
+  const right = x < window.innerWidth / 2;
+  const left = right ? x + 70 : x - 70 - w;
+  box.style.left = `${Math.max(12, Math.min(window.innerWidth - w - 12, left))}px`;
+  box.style.top = `${Math.max(12, Math.min(window.innerHeight - hgt - 150, y - 10))}px`;
 }
 
 // ---- Floaters, subtitles, prompts ---------------------------------------------------------

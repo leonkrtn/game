@@ -301,3 +301,23 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 #score .calc { font-size: 26px; background: var(--vcr); padding: 0 14px; box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6); }
 .next-unlocks { display: flex; flex-direction: column; gap: 2px; font-size: 22px; max-width: 900px; margin: 6px auto; text-align: left; }
 .next-unlocks .t { color: var(--marks); }
+
+/* Showcase: offers stand in the case, a card pops up over the one you point at. */
+#shoptip { position: absolute; width: 340px; background: var(--vcr); padding: 6px 14px 8px; box-shadow: 6px 6px 0 rgba(0, 0, 0, 0.65); text-transform: uppercase; pointer-events: none; display: flex; flex-direction: column; gap: 3px; font-size: 20px; line-height: 1.1; }
+#shoptip .name { font-size: 30px; }
+#shoptip .desc { text-transform: none; font-size: 21px; }
+#shoptip .set { color: var(--luck); font-size: 18px; }
+#shoptip .fit { color: var(--money); font-size: 18px; }
+#shoptip .buy { margin-top: 4px; padding-top: 4px; border-top: 2px solid rgba(255, 255, 255, 0.3); color: #c8c0d8; }
+#shoptip .buy.ok { color: var(--marks); }
+#shopbar { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; text-transform: uppercase; }
+#shopbar .title { font-size: 34px; background: rgba(0, 0, 0, 0.6); padding: 0 16px; }
+#shopbar .title .marks { color: var(--marks); }
+#shopbar .hintline { font-size: 21px; opacity: 0.85; }
+#shopbar .btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.menu.narrow { max-width: 900px; }
+.rows.owned button.row > span:first-child { display: flex; flex-direction: column; align-items: flex-start; }
+.rows.owned small { font-size: 19px; text-transform: none; opacity: 0.85; white-space: normal; text-align: left; }
+#shopbar .btns { font-size: 24px; }
+#shopbar .btns button { padding: 0 4px; }
+#shopbar .btns button:hover:not(:disabled) { background: var(--osd); color: #000; text-shadow: none; }

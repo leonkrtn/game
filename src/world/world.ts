@@ -89,7 +89,9 @@ export class World {
   private tableGroup = new THREE.Group();
   private placedItems: PlacedItem[] = [];
   private slotPlates: THREE.Mesh[] = [];
-  private showcaseItems: { index: number; fig: Figurine; holder: THREE.Group }[] = [];
+  private showcaseItems: { index: number; fig: Figurine; holder: THREE.Group; tag: THREE.Mesh; size: number }[] = [];
+  /** Showcase offer under the mouse, grown and turned towards you. */
+  hoverShowcase?: number;
   private marqueeCanvas = document.createElement('canvas');
   private marqueeTex!: THREE.CanvasTexture;
   private dolly!: THREE.Group;
@@ -527,7 +529,7 @@ export class World {
     const t = TABLE;
     const targets: { id: 'kasse' | 'vitrine' | 'phone' | 'smokes' | 'table'; x: number; z: number; reach: number }[] = [
       { id: 'kasse', x: KASSE.x, z: KASSE.z + KASSE.halfD, reach: 1.9 },
-      { id: 'vitrine', x: VITRINE.x + VITRINE.halfW, z: VITRINE.z, reach: 1.8 },
+      { id: 'vitrine', x: THREE.MathUtils.clamp(p.x, VITRINE.x - VITRINE.halfD, VITRINE.x + VITRINE.halfD), z: VITRINE.z - VITRINE.halfW, reach: 1.6 },
       { id: 'phone', x: PHONE.x, z: PHONE.z, reach: 1.6 },
       { id: 'smokes', x: SMOKES.x, z: SMOKES.z + SMOKES.halfW, reach: 1.6 },
       // The table's nearest edge point, so it can be used from its whole long side.
@@ -612,8 +614,8 @@ export class World {
 
   /** Puts the player a few steps into the room, looking at the table. */
   resetPlayer(): void {
-    this.player.group.position.set(TABLE.x - 0.4, 0, TABLE.z + 2.6);
-    this.yaw = 0;
+    this.player.group.position.set(TABLE.x - 1.3, 0, TABLE.z + 1.45);
+    this.yaw = -0.35;
     this.pitch = -0.12;
     this.player.group.visible = false;
     this.velocity.set(0, 0, 0);
@@ -843,6 +845,8 @@ export class World {
         if (it.gold) goldify(fig);
         const holder = new THREE.Group();
         holder.add(fig.group);
+        // A touch larger than life, so the detail reads from the chair.
+        holder.scale.setScalar(1.3);
         holder.userData.itemUid = it.uid;
         this.tableGroup.add(holder);
         p = { uid: it.uid, def: it.def, fig, holder, jump: 1, gold: !!it.gold };
@@ -860,10 +864,10 @@ export class World {
     const rimMat = new THREE.MeshStandardMaterial({ color: 0xc9a04a, metalness: 1, roughness: 0.3 });
     for (let i = 0; i < slots; i++) {
       const s = itemSlot(i, slots);
-      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.048, 0.05, 0.006, 32), plateMat);
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.058, 0.06, 0.006, 40), plateMat);
       plate.position.set(s.x, 0.003, s.z);
       plate.receiveShadow = true;
-      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.049, 0.002, 6, 32), rimMat);
+      const rim = new THREE.Mesh(new THREE.TorusGeometry(0.059, 0.002, 6, 40), rimMat);
       rim.rotation.x = Math.PI / 2;
       rim.position.set(s.x, 0.006, s.z);
       this.tableGroup.add(plate, rim);
@@ -893,8 +897,8 @@ export class World {
 
   // ---- Showcase and marquee ----------------------------------------------------------
 
-  setShowcase(shop: ShopItem[]): void {
-    for (const s of this.showcaseItems) this.casino.showcase.remove(s.holder);
+  setShowcase(shop: ShopItem[], canBuy: (i: number) => boolean = () => true): void {
+    for (const s of this.showcaseItems) this.casino.showcase.remove(s.holder, s.tag);
     this.showcaseItems = [];
     const V = VITRINE;
     const items = shop.map((it, i) => ({ it, i })).filter((x) => x.it.kind === 'item');
@@ -904,17 +908,50 @@ export class World {
         if (it.sold) return;
         const color = POCKET_MOD_INFO[it.def as keyof typeof POCKET_MOD_INFO]?.color ?? ((it.def as PocketToolId) === 'pinsel' ? '#e8e0d0' : '#7a7aff');
         const fig = it.kind === 'item' ? buildFigurine(it.def) : buildUpgradeBox(color);
+        if (it.fuse) goldify(fig);
         const holder = new THREE.Group();
         holder.add(fig.group);
         holder.scale.setScalar(scale);
-        holder.position.set(0.05, y, -V.halfD + 0.25 + (col + 0.5) * ((V.halfD * 2 - 0.5) / list.length));
+        // Seen from the table, offers read left to right in shop order.
+        const z = V.halfD - 0.2 - (col + 0.5) * ((V.halfD * 2 - 0.4) / list.length);
+        holder.position.set(0.02, y, z);
         holder.rotation.y = Math.PI / 2;
-        this.casino.showcase.add(holder);
-        this.showcaseItems.push({ index: i, fig, holder });
+        // A little price card leaning in front of each offer.
+        const tag = new THREE.Mesh(new THREE.PlaneGeometry(0.11, 0.05), new THREE.MeshBasicMaterial({ map: priceTag(it.price, canBuy(i)), transparent: true }));
+        tag.position.set(V.halfW - 0.1, y + 0.03, z);
+        tag.rotation.set(0, Math.PI / 2, 0);
+        tag.rotateX(-0.5);
+        this.casino.showcase.add(holder, tag);
+        this.showcaseItems.push({ index: i, fig, holder, tag, size: scale });
       });
     };
-    place(items, 1.31, 2.2);
-    place(tools, 0.73, 1.6);
+    place(items, 1.31, 2.8);
+    place(tools, 0.73, 2.1);
+  }
+
+  /** Showcase offer (shop index) under the pointer. */
+  pickShowcase(clientX: number, clientY: number): number | undefined {
+    const ndc = new THREE.Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    // Generous targets: each offer's bounding box, not only its thin parts.
+    let best: { index: number; d: number } | undefined;
+    const box = new THREE.Box3();
+    const hit = new THREE.Vector3();
+    for (const s of this.showcaseItems) {
+      box.setFromObject(s.holder).expandByScalar(0.03);
+      if (this.raycaster.ray.intersectBox(box, hit)) {
+        const d = hit.distanceTo(this.raycaster.ray.origin);
+        if (!best || d < best.d) best = { index: s.index, d };
+      }
+    }
+    return best?.index;
+  }
+
+  /** Screen position just above a showcase offer, for its tooltip. */
+  showcaseAnchor(index: number): { x: number; y: number } | undefined {
+    const s = this.showcaseItems.find((x) => x.index === index);
+    if (!s) return undefined;
+    return this.project(s.holder.localToWorld(new THREE.Vector3(0, s.fig.height + 0.01, 0)));
   }
 
   private buildMarquee(): void {
@@ -1205,7 +1242,10 @@ export class World {
     }
     for (const s of this.showcaseItems) {
       s.fig.animate?.(this.time);
-      s.fig.group.rotation.y = this.time * 0.5 + s.index;
+      const hot = this.hoverShowcase === s.index;
+      s.fig.group.rotation.y = hot ? s.fig.group.rotation.y + dt * 2.2 : this.time * 0.4 + s.index;
+      const k = s.size * (hot ? 1.22 : 1);
+      s.holder.scale.setScalar(s.holder.scale.x + (k - s.holder.scale.x) * Math.min(1, dt * 10));
     }
     const ring = this.phoneRinging && Math.sin(this.time * 18) > 0 && this.time % 2 < 1.2;
     this.casino.phoneHandset.position.y = 0.11 + (ring ? 0.012 : 0);
@@ -1332,8 +1372,9 @@ export class World {
         look.set(KASSE.x, 1.45, KASSE.z - 0.3);
         break;
       case 'vitrine':
-        pos.set(VITRINE_SPOT.x + 0.25, this.eyeHeight - 0.05, VITRINE_SPOT.z + 0.15);
-        look.set(VITRINE.x, 1.15, VITRINE.z);
+        // Step back and look into the whole case: the offers can be pointed at with the mouse.
+        pos.set(VITRINE.x, 1.55, VITRINE.z - VITRINE.halfW - 1.6);
+        look.set(VITRINE.x, 1.05, VITRINE.z);
         break;
       case 'phone':
         pos.set(PHONE_SPOT.x - 0.1, this.eyeHeight, PHONE_SPOT.z + 0.2);
@@ -1403,3 +1444,26 @@ export class World {
   }
 }
 
+
+/** Small cream card with the price in lucky marks; greyed out when it can't be bought. */
+function priceTag(price: number, ok: boolean): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 58;
+  const g = c.getContext('2d')!;
+  g.fillStyle = ok ? '#f4ecd6' : '#8a8478';
+  g.beginPath();
+  g.roundRect(2, 2, 124, 54, 6);
+  g.fill();
+  g.strokeStyle = '#9a7a3a';
+  g.lineWidth = 3;
+  g.stroke();
+  g.fillStyle = ok ? '#5a1a8a' : '#3a3a3a';
+  g.font = '700 36px Georgia, serif';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(`◆ ${price}`, 64, 31);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}

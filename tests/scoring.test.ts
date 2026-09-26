@@ -379,7 +379,7 @@ describe('streaks and hit preview', () => {
   it('previews the mult a hit would get', () => {
     const run = new Run({ seed: 3 });
     run.items = [{ uid: 1, def: 'kerze', counter: 0 }];
-    run.news = undefined;
+    run.news = '';
     expect(run.previewHit('red')?.max).toBe(2);
     expect(run.previewHit('black')?.max).toBe(1);
     const mixed = run.previewHit('doz0')!;

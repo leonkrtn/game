@@ -1,14 +1,12 @@
 import {
-  BALLS, CONSUMABLES, DEBTS, GOLD_DESC, ITEMS, MAX_CONSUMABLES, NEWS, OFFERS, POCKET_ITEMS, POCKET_MOD_INFO, RARITY, RULES, SETS, SHARK_FACTOR,
+  BALLS, CONSUMABLES, DEBTS, ITEMS, MAX_CONSUMABLES, NEWS, OFFERS, POCKET_ITEMS, RULES, SETS, SHARK_FACTOR,
   STAGES, START_KITS, type PocketToolId,
 } from '../game/content';
 import { ACHIEVEMENTS, nearestUnlocks, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
-import type { ItemPreview } from '../world/preview';
 import { fmt, h } from './dom';
-import { fitReason } from './guide';
-import { boostLabels, itemDesc, itemName, modLegend, numberPicker, pct, rarityClass, row, setInfo, wheelRing } from './hud';
+import { boostLabels, itemDesc, itemName, modLegend, numberPicker, pct, rarityClass, row, wheelRing } from './hud';
 
 function head(title: string, right = ''): HTMLElement {
   return h('div', { class: 'head' }, h('h2', { text: title }), h('span', { html: right }));
@@ -76,69 +74,19 @@ export interface VitrineHandlers {
   close(): void;
 }
 
-export function vitrineView(run: Run, hd: VitrineHandlers, preview: ItemPreview): HTMLElement {
-  const name = h('div', { class: 'name' });
-  const rar = h('div', {});
-  const desc = h('div', { class: 'desc' });
-  const show = (kind: 'item' | 'pocket', def: string, owned?: { counter: number; uid: number; gold?: boolean }) => {
-    if (kind === 'item') {
-      const d = ITEMS[def];
-      const fuse = !owned && run.items.some((t) => t.def === def && !t.gold);
-      const gold = owned?.gold || fuse;
-      name.textContent = (gold ? '★ ' : '') + d.name;
-      name.className = 'name ' + rarityClass(def);
-      rar.textContent = RARITY[d.rarity].name.toUpperCase() + (owned ? ' · AUF DEINEM TISCH' : fuse ? ' · DEIN EXEMPLAR WIRD GOLDEN' : '');
-      const text = owned ? itemDesc({ def, counter: owned.counter, gold: owned.gold }) : fuse ? `GOLDEN: ${GOLD_DESC[def]} (vorher: ${d.desc})` : d.desc;
-      const set = setInfo(run, def);
-      desc.textContent = text.replace(' (aktuell +{n})', '') + (set ? `\n${set}` : '');
-      preview.show(def, undefined, !!gold);
-    } else {
-      const p = POCKET_ITEMS[def as PocketToolId];
-      name.textContent = p.name;
-      name.className = 'name';
-      rar.textContent = 'RAD-UMBAU';
-      desc.textContent = p.desc;
-      preview.show('upgrade:' + def, POCKET_MOD_INFO[def as keyof typeof POCKET_MOD_INFO]?.color ?? (def === 'pinsel' ? '#e8e0d0' : '#7a7aff'));
-    }
-  };
-
-  const offer = h('div', { class: 'rows' }, label('IM ANGEBOT · PREIS IN GLÜCKSMARKEN'));
-  run.shop.forEach((it, i) => {
-    const isItem = it.kind === 'item';
-    const n = isItem ? (it.fuse ? `★ ${ITEMS[it.def].name} → GOLDEN` : ITEMS[it.def].name) : POCKET_ITEMS[it.def as PocketToolId].name;
-    const full = isItem && !it.fuse && run.items.length >= run.perks.slots;
-    const cls = isItem ? rarityClass(it.def) : '';
-    const value = it.sold ? 'VERKAUFT' : full ? 'TISCH VOLL' : `<span class="price">◆${it.price}</span>`;
-    const fit = isItem && !it.sold ? fitReason(run, it.def) : undefined;
-    offer.append(row(`<span class="${cls}">${n}</span>${fit ? `<span class="fit">★ ${fit}</span>` : ''}`, value, () => (isItem ? hd.buy(i) : hd.target(i)), {
-      disabled: !run.canBuy(i),
-      onHover: () => show(isItem ? 'item' : 'pocket', it.def),
-    }));
-  });
-  offer.append(row('NEU BESTÜCKEN', `<span class="price">◆${run.rerollCost}</span>`, hd.reroll, { disabled: run.marks < run.rerollCost || !run.cashierOpen }));
-
-  const mine = h('div', { class: 'rows' }, label(`AUF DEINEM TISCH ${run.items.length}/${run.perks.slots} · ◀ ▶ VERSCHIEBEN, ENTER VERKAUFT`));
-  if (run.items.length) mine.append(h('div', { class: 'info', text: 'Kauf ein zweites Exemplar eines Talismans, dann wird deiner golden und stärker.' }));
-  if (!run.items.length) mine.append(h('div', { class: 'info', text: 'Noch nichts. Talismane stehen auf deinem Tisch und wirken bei jedem Dreh. Die Reihenfolge zählt für den Handspiegel.' }));
+/** Your talismans: sell or reorder them. Each row carries its own text, so nothing jumps while you move through it. */
+export function ownedView(run: Run, hd: Pick<VitrineHandlers, 'sell' | 'move' | 'close'>): HTMLElement {
+  const list = h('div', { class: 'rows owned' }, label(`AUF DEINEM TISCH ${run.items.length}/${run.perks.slots} · ◀ ▶ VERSCHIEBEN · ENTER VERKAUFT`));
+  if (!run.items.length) list.append(h('div', { class: 'info', text: 'Noch nichts. Talismane stehen auf deinem Tisch und wirken bei jedem Dreh.' }));
   run.items.forEach((t) => {
-    mine.append(row(`<span class="${rarityClass(t.def)}">${itemName(t)}</span>`, `VERKAUFEN +◆${run.sellPrice(t.uid)}`, () => hd.sell(t.uid), {
-      onHover: () => show('item', t.def, t),
+    const b = row(`<span class="${rarityClass(t.def)}">${itemName(t)}</span><small>${itemDesc(t)}</small>`, `VERKAUFEN +◆${run.sellPrice(t.uid)}`, () => hd.sell(t.uid), {
       onStep: (d) => hd.move(t.uid, d as -1 | 1),
-    }));
+    });
+    list.append(b);
   });
-  mine.append(row('ZURÜCK', 'ESC', hd.close));
-
-  const first = run.shop.find((s) => !s.sold) ?? run.shop[0];
-  if (first) show(first.kind === 'item' ? 'item' : 'pocket', first.def);
-  else if (run.items[0]) show('item', run.items[0].def, run.items[0]);
-
-  return h('div', { class: 'menu' },
-    head('KURIOSITÄTEN', `<span class="price">◆ ${run.marks} GLÜCKSMARKEN</span>`),
-    h('div', { class: 'cols' },
-      h('div', { class: 'rows', style: 'gap:10px' }, offer, mine),
-      h('div', { class: 'preview' }, preview.canvas, rar, name, desc),
-    ),
-  );
+  list.append(h('div', { class: 'info', text: 'Die Reihenfolge zählt für den Handspiegel: er kopiert den Talisman rechts daneben.' }));
+  list.append(row('ZURÜCK ZUR VITRINE', 'ESC', hd.close));
+  return h('div', { class: 'menu narrow' }, head('DEINE TALISMANE', `<span class="price">◆ ${run.marks} GLÜCKSMARKEN</span>`), list);
 }
 
 // ---- Phone ---------------------------------------------------------------------------------

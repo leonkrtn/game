@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
-import { DOOR, KASSE, PHONE, ROOM, SMOKES, TABLE, VITRINE } from './layout';
+import { BAR, DOOR, JUKEBOX, KASSE, LOUNGE, PHONE, ROOM, SMOKES, TABLE, TV, VITRINE } from './layout';
 import { carpet, ceiling, damask, marble, smudges, wood, woodBump } from './materials';
 
 /** Handles to the parts of the room that animate or that the game talks to. */
@@ -101,17 +101,35 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     const panel = mesh(new THREE.BoxGeometry(len, 1.1, 0.05), panelMat, 0, 0.55, 0.025);
     const rail = mesh(new THREE.CylinderGeometry(0.02, 0.02, len, 10), brass, 0, 1.12, 0.06);
     rail.rotation.z = Math.PI / 2;
-    const skirting = mesh(new THREE.BoxGeometry(len, 0.14, 0.07), darkWood, 0, 0.07, 0.035);
-    const crown = mesh(new THREE.BoxGeometry(len, 0.12, 0.12), darkWood, 0, H - 0.06, 0.06);
-    g.add(paper, panel, rail, skirting, crown);
-    for (let k = -len / 2 + 0.4; k < len / 2; k += 0.8) g.add(mesh(new THREE.BoxGeometry(0.05, 1.0, 0.07), darkWood, k, 0.55, 0.04));
+    const skirting = mesh(new THREE.BoxGeometry(len, 0.16, 0.07), darkWood, 0, 0.08, 0.035);
+    const cap = mesh(new THREE.BoxGeometry(len, 0.05, 0.09), darkWood, 0, 1.08, 0.045);
+    const crown = mesh(new THREE.BoxGeometry(len, 0.14, 0.12), darkWood, 0, H - 0.07, 0.06);
+    const crownLip = mesh(new THREE.BoxGeometry(len, 0.03, 0.17), darkWood, 0, H - 0.155, 0.085, false);
+    const pictureRail = mesh(new THREE.BoxGeometry(len, 0.035, 0.03), darkWood, 0, H - 0.42, 0.015, false);
+    g.add(paper, panel, rail, skirting, cap, crown, crownLip, pictureRail);
+    // Wainscot: raised, bevelled panels between stiles.
+    const bay = 0.8;
+    const n = Math.floor(len / bay);
+    const start = -((n - 1) * bay) / 2;
+    for (let i = 0; i < n; i++) {
+      const k = start + i * bay;
+      g.add(mesh(new RoundedBoxGeometry(bay - 0.2, 0.7, 0.03, 2, 0.012), panelMat, k, 0.6, 0.06, false));
+      g.add(mesh(new THREE.BoxGeometry(bay - 0.12, 0.025, 0.02), darkWood, k, 0.975, 0.055, false));
+      g.add(mesh(new THREE.BoxGeometry(bay - 0.12, 0.025, 0.02), darkWood, k, 0.225, 0.055, false));
+      g.add(mesh(new THREE.BoxGeometry(0.05, 1.0, 0.07), darkWood, k + bay / 2, 0.58, 0.04));
+    }
     g.position.set(x, 0, z);
     g.rotation.y = rot;
     scene.add(g);
   };
   wall(W, 0, ROOM.z0, 0);
+  wall(W, 0, ROOM.z1, Math.PI);
   wall(D, ROOM.x0, 0, Math.PI / 2);
   wall(D, ROOM.x1, 0, -Math.PI / 2);
+
+  // Coffered ceiling: dark beams in a grid.
+  for (let x = ROOM.x0 + 1.25; x < ROOM.x1 - 0.5; x += 2.5) scene.add(mesh(new THREE.BoxGeometry(0.16, 0.16, D), darkWood, x, H - 0.08, 0, false));
+  for (let z = ROOM.z0 + 1.3; z < ROOM.z1 - 0.5; z += 2.6) scene.add(mesh(new THREE.BoxGeometry(W, 0.16, 0.16), darkWood, 0, H - 0.08, z, false));
 
   // Door with velvet curtains and an exit sign.
   const door = new THREE.Group();
@@ -127,30 +145,43 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
 
   // Ceiling neon trim.
   const trimMat = new THREE.MeshBasicMaterial({ color: 0xff2a9a, toneMapped: false });
-  for (const [x, z, len, rot] of [[0, ROOM.z0 + 0.14, W - 0.4, 0], [ROOM.x0 + 0.14, 0, D - 0.4, Math.PI / 2], [ROOM.x1 - 0.14, 0, D - 0.4, Math.PI / 2]] as const) {
+  for (const [x, z, len, rot] of [[0, ROOM.z0 + 0.19, W - 0.4, 0], [0, ROOM.z1 - 0.19, W - 0.4, 0], [ROOM.x0 + 0.19, 0, D - 0.4, Math.PI / 2], [ROOM.x1 - 0.19, 0, D - 0.4, Math.PI / 2]] as const) {
     const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, len, 8), trimMat);
     tube.rotation.z = Math.PI / 2;
     tube.rotation.y = rot;
-    tube.position.set(x, H - 0.16, z);
+    tube.position.set(x, H - 0.2, z);
     scene.add(tube);
   }
 
   // ---- Lights ------------------------------------------------------------------
   scene.add(new THREE.HemisphereLight(0x8a7a90, 0x2a1010, 0.7));
 
+  // Billiard-style pendant: three green glass domes on a brass bar, warm bulbs inside.
   const tableLamp = new THREE.Group();
-  tableLamp.position.set(TABLE.x, 2.55, TABLE.z);
-  const shadeMat = phys({ color: 0x0e3a1c, roughness: 0.25, metalness: 0.2, clearcoat: 1, side: THREE.DoubleSide });
-  const shade = mesh(new RoundedBoxGeometry(2.4, 0.16, 0.5, 3, 0.05), shadeMat, 0, 0, 0);
-  const inner = mesh(new THREE.PlaneGeometry(2.3, 0.42), new THREE.MeshBasicMaterial({ color: 0xffe8c0, toneMapped: false }), 0, -0.081, 0, false);
-  inner.rotation.x = Math.PI / 2;
-  tableLamp.add(shade, inner);
-  for (const x of [-1, 1]) tableLamp.add(mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.9), brass, x * 0.9, 0.45, 0, false));
-  occluders.push(shade);
+  tableLamp.position.set(TABLE.x, 2.5, TABLE.z);
+  const shadeMat = phys({ color: 0x0e4a22, roughness: 0.18, metalness: 0.1, clearcoat: 1, clearcoatRoughness: 0.05, sheen: 0.4, sheenColor: new THREE.Color(0x3aff8a) });
+  const shadeInner = new THREE.MeshBasicMaterial({ color: 0xe8c890, side: THREE.BackSide, toneMapped: false });
+  const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfff0d0, toneMapped: false });
+  const bar = mesh(new THREE.CylinderGeometry(0.018, 0.018, 2.3, 16), brass, 0, 0.16, 0);
+  bar.rotation.z = Math.PI / 2;
+  tableLamp.add(bar);
+  for (const x of [-1.15, 1.15]) tableLamp.add(mesh(new THREE.SphereGeometry(0.03, 16, 12), brass, x, 0.16, 0, false));
+  const dome: [number, number][] = [[0.02, 0.16], [0.045, 0.155], [0.07, 0.13], [0.12, 0.085], [0.2, 0.035], [0.25, 0.008], [0.262, 0]];
+  for (const x of [-0.85, 0, 0.85]) {
+    const outer = mesh(new THREE.LatheGeometry(dome.map(([r, y]) => new THREE.Vector2(r, y)), 48), shadeMat, x, 0, 0);
+    const inside = mesh(new THREE.LatheGeometry(dome.map(([r, y]) => new THREE.Vector2(r * 0.985, y - 0.004)), 48), shadeInner, x, 0, 0, false);
+    const rim = mesh(new THREE.TorusGeometry(0.262, 0.008, 8, 48), brass, x, 0, 0, false);
+    rim.rotation.x = Math.PI / 2;
+    const cap = mesh(new THREE.CylinderGeometry(0.03, 0.04, 0.05, 20), brass, x, 0.16, 0);
+    const bulb = mesh(new THREE.SphereGeometry(0.045, 16, 12), bulbMat, x, 0.06, 0, false);
+    tableLamp.add(outer, inside, rim, cap, bulb);
+    occluders.push(outer);
+  }
+  for (const x of [-0.9, 0.9]) tableLamp.add(mesh(new THREE.CylinderGeometry(0.005, 0.005, H - 2.66), brass, x, 0.16 + (H - 2.66) / 2, 0, false));
   scene.add(tableLamp);
   for (const x of [-0.75, 0.75]) {
     const spot = new THREE.SpotLight(0xffd6a0, 11, 6, 0.75, 0.55, 1.6);
-    spot.position.set(TABLE.x + x, 2.45, TABLE.z);
+    spot.position.set(TABLE.x + x, 2.52, TABLE.z);
     spot.target.position.set(TABLE.x + x, 0, TABLE.z);
     spot.castShadow = true;
     spot.shadow.mapSize.set(2048, 2048);
@@ -158,7 +189,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     spot.shadow.normalBias = 0.02;
     spot.shadow.camera.near = 0.8;
     scene.add(spot, spot.target);
-    lightCone(scene, updates, TABLE.x + x, 2.42, TABLE.z, 0.16, 0.85, 1.55, 0xffd6a0, 0.1);
+    lightCone(scene, updates, TABLE.x + x, 2.48, TABLE.z, 0.24, 0.85, 1.6, 0xffd6a0, 0.08);
   }
   dust(scene, updates, TABLE.x, TABLE.z, 2.4, 0.7, 1.1, 2.3);
 
@@ -178,28 +209,82 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     lightCone(scene, updates, x, H - 0.08, z, 0.17, 0.95, 2.2, color, 0.05);
     return spot;
   };
-  lamp(KASSE.x, KASSE.z + 0.8, 16);
-  lamp(-4.6, 3.2, 12);
-  lamp(3.8, 2.6, 12);
-  lamp(VITRINE.x + 0.9, VITRINE.z, 13);
-  lamp(DOOR.x + 0.8, ROOM.z0 + 1.8, 11, 0xffb070);
-  lamp(TABLE.x, TABLE.z + 1.9, 12, 0xffd0a0);
+  lamp(KASSE.x, KASSE.z + 0.8, 15);
+  lamp(LOUNGE.x + 0.4, LOUNGE.z + 0.2, 11);
+  lamp(BAR.x - 0.9, BAR.z, 11);
+  lamp(VITRINE.x, VITRINE.z - 1.0, 13, 0xffd0a0);
+  lamp(DOOR.x + 0.6, ROOM.z0 + 1.6, 10, 0xffb070);
+
+  // Wall sconces: fabric shades on brass arms, each washing the wallpaper with warm light up and down.
+  const washMat = new THREE.MeshBasicMaterial({ map: washTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false, color: 0x9a6038 });
+  const shadeFabric = phys({ color: 0xf0d8a8, roughness: 0.9, emissive: 0xffb060, emissiveIntensity: 0.9, side: THREE.DoubleSide, sheen: 0.5, sheenColor: new THREE.Color(0xffe0b0) });
+  const sconce = (x: number, z: number, rot: number) => {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.rotation.y = rot;
+    const plate = mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.015, 24), brass, 0, 1.85, 0.008, false);
+    plate.rotation.x = Math.PI / 2;
+    const arm = mesh(new THREE.TorusGeometry(0.09, 0.008, 8, 20, Math.PI / 2), brass, 0, 1.94, 0.01, false);
+    arm.rotation.y = -Math.PI / 2;
+    const cup = mesh(new THREE.CylinderGeometry(0.025, 0.018, 0.04, 16), brass, 0, 2.02, 0.1, false);
+    const shade = mesh(new THREE.CylinderGeometry(0.06, 0.09, 0.13, 24, 1, true), shadeFabric, 0, 2.1, 0.1, false);
+    const bulb = mesh(new THREE.SphereGeometry(0.022, 12, 10), new THREE.MeshBasicMaterial({ color: 0xfff0d0, toneMapped: false }), 0, 2.07, 0.1, false);
+    const wash = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.1), washMat);
+    wash.position.set(0, 2.0, 0.012);
+    wash.renderOrder = 3;
+    g.add(plate, arm, cup, shade, bulb, wash);
+    scene.add(g);
+  };
+  sconce(ROOM.x0 + 0.6 + 0.35, ROOM.z0, 0);
+  for (const z of [-2.0, -0.05, 1.85]) sconce(ROOM.x0, z, Math.PI / 2);
+  sconce(ROOM.x1, 0.75, -Math.PI / 2);
+  for (const x of [VITRINE.x - 1.2, VITRINE.x + 1.2, ROOM.x0 + 1.0, ROOM.x1 - 1.2]) sconce(x, ROOM.z1, Math.PI);
+
+  // Potted palms in two corners.
+  const palm = (x: number, z: number, seed: number) => {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    g.add(mesh(new THREE.LatheGeometry([[0, 0], [0.16, 0], [0.2, 0.34], [0.23, 0.36], [0.23, 0.42], [0.21, 0.42], [0, 0.4]].map(([r, y]) => new THREE.Vector2(r, y)), 32), brass, 0, 0, 0));
+    g.add(mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 24), std({ color: 0x1a0e06, roughness: 1 }), 0, 0.41, 0, false));
+    const trunkPts = [[0, 0.4, 0], [0.02, 0.8, 0.01], [-0.01, 1.2, 0.02], [0.03, 1.55, 0]].map(([a, b, c]) => new THREE.Vector3(a, b, c));
+    g.add(mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(trunkPts), 20, 0.045, 10), std({ color: 0x4a3420, roughness: 0.95 }), 0, 0, 0));
+    const leafMat = phys({ map: frondTexture(), alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.55, sheen: 0.4, sheenColor: new THREE.Color(0x8aff8a) });
+    for (let i = 0; i < 9; i++) {
+      const a = (i / 9) * Math.PI * 2 + seed;
+      const len = 0.75 + ((i * 37) % 10) * 0.03;
+      const geo = new THREE.PlaneGeometry(0.34, len, 1, 8);
+      geo.translate(0, len / 2, 0);
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      for (let k = 0; k < pos.count; k++) {
+        const t = pos.getY(k) / len;
+        pos.setZ(k, -t * t * 0.45);
+        pos.setX(k, pos.getX(k) * (1 - t * 0.6));
+      }
+      geo.computeVertexNormals();
+      const frond = mesh(geo, leafMat, 0.03, 1.55, 0);
+      frond.rotation.set(-1.0 + ((i * 13) % 5) * 0.12, a, 0, 'YXZ');
+      g.add(frond);
+    }
+    scene.add(g);
+  };
+  palm(ROOM.x0 + 0.42, ROOM.z0 + 0.42, 0.3);
+  palm(ROOM.x1 - 0.42, ROOM.z0 + 0.42, 1.2);
 
 
   // Neon signs with coloured bounce light.
   const sign = neon('Rien ne va plus', '#ff2fa8', 3.4, 0.8, 'italic 700 150px Georgia, serif');
-  sign.position.set(-0.6, 2.6, ROOM.z0 + 0.05);
+  sign.position.set(TABLE.x - 0.5, 2.5, ROOM.z0 + 0.05);
   const signLight = new THREE.PointLight(0xff3fb0, 5, 5, 1.8);
-  signLight.position.set(-0.6, 2.4, ROOM.z0 + 0.5);
+  signLight.position.set(TABLE.x - 0.5, 2.3, ROOM.z0 + 0.5);
   scene.add(sign, signLight);
   const kasseSign = neon('KASSE', '#ffb000', 1.3, 0.36, '700 220px Georgia, serif');
   kasseSign.position.set(KASSE.x, 2.5, KASSE.z + KASSE.halfD - 0.02);
   scene.add(kasseSign);
   const barSign = neon('BAR', '#27e3ff', 0.9, 0.36, '700 260px Arial Narrow, Arial, sans-serif');
-  barSign.position.set(ROOM.x1 - 0.04, 2.35, 3.9);
+  barSign.position.set(ROOM.x1 - 0.04, 2.35, BAR.z);
   barSign.rotation.y = -Math.PI / 2;
   const barLight = new THREE.PointLight(0x27e3ff, 3, 4, 2);
-  barLight.position.set(ROOM.x1 - 0.8, 2.1, 3.9);
+  barLight.position.set(ROOM.x1 - 0.8, 2.1, BAR.z);
   scene.add(barSign, barLight);
   let flickerT = 0;
   updates.push((dt, t) => {
@@ -244,7 +329,15 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     const glass = phys({ color: 0xdfeaff, transparent: true, opacity: 0.12, roughness: 0.03, metalness: 0, depthWrite: false });
     const g = new THREE.Group();
     g.position.set(V.x, 0, V.z);
+    // Built with its glass towards +x, turned so it faces the table.
+    g.rotation.y = Math.PI / 2;
     g.add(mesh(new RoundedBoxGeometry(V.halfW * 2, 0.7, V.halfD * 2, 3, 0.02), lacquer, 0, 0.35, 0));
+    g.add(mesh(new THREE.BoxGeometry(0.02, V.height - 0.7, V.halfD * 2), lacquer, -V.halfW + 0.005, 0.7 + (V.height - 0.7) / 2, 0));
+    // Lit from inside: a warm strip under the lid and a soft light over the shelves.
+    const strip = mesh(new THREE.BoxGeometry(0.03, 0.012, V.halfD * 2 - 0.1), new THREE.MeshBasicMaterial({ color: 0xffe6b8, toneMapped: false }), V.halfW - 0.08, V.height - 0.05, 0, false);
+    const caseLight = new THREE.PointLight(0xffd9a0, 5, 2.2, 1.6);
+    caseLight.position.set(0.05, V.height - 0.2, 0);
+    g.add(strip, caseLight);
     g.add(mesh(new RoundedBoxGeometry(V.halfW * 2 + 0.05, 0.08, V.halfD * 2 + 0.05, 2, 0.02), lacquer, 0, V.height, 0));
     g.add(mesh(new THREE.BoxGeometry(0.03, V.height - 0.7, V.halfD * 2), velvet, -V.halfW + 0.02, 0.7 + (V.height - 0.7) / 2, 0));
     const front = mesh(new THREE.PlaneGeometry(V.halfD * 2, V.height - 0.7), glass, V.halfW, 0.7 + (V.height - 0.7) / 2, 0, false);
@@ -312,14 +405,14 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
 
   // Regulars leaning on the bar.
   const guestSpots: Casino['guestSpots'] = [
-    { x: ROOM.x1 - 2.25, z: 3.3, heading: Math.PI / 2 },
-    { x: ROOM.x1 - 2.25, z: 4.4, heading: Math.PI / 2 },
+    { x: BAR.x - 1.15, z: BAR.z - 0.6, heading: Math.PI / 2 },
+    { x: BAR.x - 1.15, z: BAR.z + 0.5, heading: Math.PI / 2 },
   ];
 
   // ---- Bar corner ------------------------------------------------------------------
   {
     const g = new THREE.Group();
-    g.position.set(ROOM.x1 - 1.1, 0, 3.9);
+    g.position.set(BAR.x, 0, BAR.z);
     g.add(mesh(new RoundedBoxGeometry(0.7, 1.05, 2.2, 3, 0.03), panelMat, 0, 0.525, 0));
     g.add(mesh(new RoundedBoxGeometry(0.85, 0.06, 2.35, 2, 0.02), lacquer, 0, 1.08, 0));
     const shelf = mesh(new THREE.BoxGeometry(0.3, 0.03, 2.0), darkWood, 0.78, 1.55, 0);
@@ -357,7 +450,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
 
   // ---- Lounge: velvet chairs, jukebox and a CRT on a trolley ----------------------------
   if (chair) {
-    const spots: [number, number, number][] = [[-5.9, 3.9, 0.6], [-4.7, 4.5, -0.3], [TABLE.x + TABLE.halfW + 0.55, TABLE.z + 0.1, -Math.PI / 2]];
+    const spots: [number, number, number][] = [[LOUNGE.x - 0.5, LOUNGE.z + 0.3, 0.9], [LOUNGE.x + 0.55, LOUNGE.z + 0.75, -0.4], [TABLE.x + TABLE.halfW + 0.55, TABLE.z + 0.1, -Math.PI / 2]];
     for (const [x, z, rot] of spots) {
       const c = chair.scene.clone(true);
       c.traverse((o) => {
@@ -373,17 +466,17 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   }
   {
     const side = new THREE.Group();
-    side.position.set(-5.3, 0, 4.15);
+    side.position.set(LOUNGE.x + 0.05, 0, LOUNGE.z + 0.85);
     side.add(mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.03, 24), lacquer, 0, 0.58, 0));
     side.add(mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.56, 10), brass, 0, 0.28, 0));
     side.add(mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.02, 20), phys({ color: 0x9ab8c8, transparent: true, opacity: 0.6, roughness: 0.1 }), 0.08, 0.605, 0));
     scene.add(side);
-    smoke(scene, updates, new THREE.Vector3(-5.22, 0.64, 4.15));
+    smoke(scene, updates, new THREE.Vector3(LOUNGE.x + 0.13, 0.64, LOUNGE.z + 0.85));
   }
   {
     // Jukebox.
     const g = new THREE.Group();
-    g.position.set(ROOM.x0 + 0.5, 0, -3.6);
+    g.position.set(JUKEBOX.x, 0, JUKEBOX.z);
     g.rotation.y = Math.PI / 2;
     g.add(mesh(new RoundedBoxGeometry(0.9, 1.2, 0.6, 4, 0.08), lacquer, 0, 0.6, 0));
     const arch = mesh(new THREE.CylinderGeometry(0.45, 0.45, 0.6, 32, 1, false, 0, Math.PI), lacquer, 0, 1.2, 0);
@@ -401,7 +494,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   {
     // CRT television with a horse race and static.
     const g = new THREE.Group();
-    g.position.set(ROOM.x1 - 0.55, 0, -2.9);
+    g.position.set(TV.x, 0, TV.z);
     g.rotation.y = -Math.PI / 2 + 0.3;
     g.add(mesh(new THREE.BoxGeometry(0.6, 0.6, 0.45), darkWood, 0, 0.3, 0));
     g.add(mesh(new RoundedBoxGeometry(0.62, 0.5, 0.48, 3, 0.05), std({ color: 0x2a2420, roughness: 0.5 }), 0, 0.86, 0));
@@ -572,9 +665,11 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     grp.rotation.y = rot;
     scene.add(grp);
   };
-  poster(ROOM.x0 + 0.03, -1.2, Math.PI / 2, 'Big Band', 'JEDEN FREITAG · 22 UHR', 330);
-  poster(ROOM.x0 + 0.03, 2.4, Math.PI / 2, 'Jackpot', 'AB 1.000.000 LIRE', 200);
-  poster(ROOM.x1 - 0.03, -1.4, -Math.PI / 2, 'Casino', 'SEIT 1961', 20);
+  poster(ROOM.x0 + 0.03, -1.0, Math.PI / 2, 'Big Band', 'JEDEN FREITAG · 22 UHR', 330);
+  poster(ROOM.x0 + 0.03, 0.9, Math.PI / 2, 'Jackpot', 'AB 1.000.000 LIRE', 200);
+  poster(ROOM.x1 - 0.03, -1.35, -Math.PI / 2, 'Casino', 'SEIT 1961', 20);
+  poster(VITRINE.x - 2.2, ROOM.z1 - 0.03, Math.PI, 'Monte Carlo', 'GRAND PRIX 1987', 45);
+  poster(VITRINE.x + 2.2, ROOM.z1 - 0.03, Math.PI, 'Roulette', 'FAITES VOS JEUX', 280);
 
   // Haze near the ceiling.
   haze(scene, updates);
@@ -864,3 +959,59 @@ function dust(scene: THREE.Scene, updates: ((dt: number, t: number) => void)[], 
   });
 }
 
+
+/** Soft light thrown on a wall by a sconce: a bright spot at the shade, cones fading up and down. */
+function washTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 180;
+  const g = c.getContext('2d')!;
+  const blob = (y: number, rx: number, ry: number, a: number) => {
+    g.save();
+    g.translate(64, y);
+    g.scale(rx / 64, ry / 64);
+    const grad = g.createRadialGradient(0, 0, 0, 0, 0, 64);
+    grad.addColorStop(0, `rgba(255,255,255,${a})`);
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(-64, -64, 128, 128);
+    g.restore();
+  };
+  blob(26, 50, 40, 0.35);
+  blob(128, 42, 60, 0.25);
+  blob(78, 22, 16, 0.55);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** A palm frond: a midrib with narrow leaflets, cut out with alpha. */
+function frondTexture(): THREE.CanvasTexture {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 256;
+  const g = c.getContext('2d')!;
+  g.strokeStyle = '#3a6a2a';
+  g.lineWidth = 3;
+  g.beginPath();
+  g.moveTo(64, 256);
+  g.lineTo(64, 0);
+  g.stroke();
+  for (let y = 250; y > 6; y -= 7) {
+    const w = 60 * Math.sin((y / 256) * Math.PI) + 4;
+    for (const s of [-1, 1]) {
+      const grad = g.createLinearGradient(64, y, 64 + s * w, y - 20);
+      grad.addColorStop(0, '#2f6a24');
+      grad.addColorStop(1, '#5aa03a');
+      g.strokeStyle = grad;
+      g.lineWidth = 4;
+      g.beginPath();
+      g.moveTo(64, y);
+      g.quadraticCurveTo(64 + s * w * 0.5, y - 6, 64 + s * w, y - 22);
+      g.stroke();
+    }
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
