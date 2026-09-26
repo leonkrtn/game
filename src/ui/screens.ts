@@ -2,11 +2,12 @@ import {
   BALLS, CONSUMABLES, DEBTS, GOLD_DESC, ITEMS, MAX_CONSUMABLES, NEWS, OFFERS, POCKET_ITEMS, POCKET_MOD_INFO, RARITY, RULES, SETS, SHARK_FACTOR,
   STAGES, START_KITS, type PocketToolId,
 } from '../game/content';
-import { ACHIEVEMENTS, rewardName, type Profile } from '../game/meta';
+import { ACHIEVEMENTS, nearestUnlocks, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
 import type { ItemPreview } from '../world/preview';
 import { fmt, h } from './dom';
+import { fitReason } from './guide';
 import { boostLabels, itemDesc, itemName, modLegend, numberPicker, pct, rarityClass, row, setInfo, wheelRing } from './hud';
 
 function head(title: string, right = ''): HTMLElement {
@@ -108,7 +109,8 @@ export function vitrineView(run: Run, hd: VitrineHandlers, preview: ItemPreview)
     const full = isItem && !it.fuse && run.items.length >= run.perks.slots;
     const cls = isItem ? rarityClass(it.def) : '';
     const value = it.sold ? 'VERKAUFT' : full ? 'TISCH VOLL' : `<span class="price">◆${it.price}</span>`;
-    offer.append(row(`<span class="${cls}">${n}</span>`, value, () => (isItem ? hd.buy(i) : hd.target(i)), {
+    const fit = isItem && !it.sold ? fitReason(run, it.def) : undefined;
+    offer.append(row(`<span class="${cls}">${n}</span>${fit ? `<span class="fit">★ ${fit}</span>` : ''}`, value, () => (isItem ? hd.buy(i) : hd.target(i)), {
       disabled: !run.canBuy(i),
       onHover: () => show(isItem ? 'item' : 'pocket', it.def),
     }));
@@ -339,14 +341,28 @@ function runSummary(run: Run): HTMLElement {
   );
 }
 
-export function gameOverView(run: Run, rewind: () => void): HTMLElement {
+/** "Almost there": the locked achievements this run came closest to, with what they unlock. */
+function nextUnlocks(profile: Profile, run: Run): HTMLElement | null {
+  const progress = (have: number, need: number) => (need >= 1000 ? `${fmt(Math.min(have, need))}/${fmt(need)}` : `${Math.min(have, need)}/${need}`);
+  const list = nearestUnlocks(profile, run);
+  if (!list.length) return null;
+  return h('div', { class: 'next-unlocks' },
+    h('div', { class: 't', text: 'FAST GESCHAFFT – NÄCHSTE FREISCHALTUNGEN:' }),
+    ...list.map(({ a, have, need }) => h('div', {
+      text: `▸ ${a.name.toUpperCase()}${need ? ` (${progress(have ?? 0, need)})` : ''}: ${a.desc} → ${a.rewards.map(rewardName).join(', ').toUpperCase()}`,
+    })),
+  );
+}
+
+export function gameOverView(run: Run, profile: Profile, retry: () => void, rewind: () => void): HTMLElement {
   return h('div', { class: 'caught' },
     h('div', { style: 'font-size:34px', text: '■ STOP' }),
     h('h1', { text: 'ERWISCHT.' }),
     h('div', { style: 'font-size:28px', html: `DIE GELDEINTREIBER WOLLTEN ${fmt(run.debt)}. DU HATTEST ${fmt(run.cash + run.deposit)}.` }),
     h('div', { style: 'font-size:24px;opacity:.85', html: `RATEN ${run.paidRates} · DREHS ${run.stats.spins} · NACHHOPSER ${run.stats.hops} · DUELLE ${run.stats.duelWins}/${run.stats.duelWins + run.stats.duelLosses}` }),
     runSummary(run),
-    h('div', { class: 'rows' }, row('◀◀ ZURÜCKSPULEN', '', rewind)),
+    nextUnlocks(profile, run),
+    h('div', { class: 'rows' }, row('▶ SOFORT NOCHMAL (GLEICHE AUSWAHL)', 'ENTER', retry), row('◀◀ ZURÜCKSPULEN', '', rewind)),
   );
 }
 

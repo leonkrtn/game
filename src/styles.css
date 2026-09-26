@@ -274,7 +274,7 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 #slip .meter { height: 6px; background: rgba(255, 255, 255, 0.15); margin-bottom: 4px; }
 #slip .meter i { display: block; height: 100%; background: var(--debt); }
 /* First-run hints: a caption strip like a subtitle on the tape. */
-#hint { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: min(620px, calc(100% - 700px)); min-width: 300px; text-align: center; font-size: 26px; background: rgba(0, 0, 0, 0.7); padding: 4px 14px; border-left: 4px solid var(--luck); text-transform: uppercase; }
+#hint { position: absolute; left: 50%; top: 150px; transform: translateX(-50%); width: min(620px, calc(100% - 700px)); min-width: 300px; text-align: center; font-size: 26px; background: rgba(0, 0, 0, 0.7); padding: 4px 14px; border-left: 4px solid var(--luck); text-transform: uppercase; }
 #hint kbd { font-size: 22px; }
 
 /* Multiplier heat. */
@@ -285,3 +285,19 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 @keyframes heat { from { transform: translate(-1px, 1px) rotate(-0.6deg); } to { transform: translate(1px, -1px) rotate(0.6deg); } }
 .summary { display: flex; flex-direction: column; gap: 2px; font-size: 24px; text-align: center; max-width: 900px; margin: 8px auto; }
 .summary .tape { opacity: 0.6; font-size: 22px; letter-spacing: 0.1em; }
+
+/* Goal strip: rate progress, next step, streak. */
+#goal { position: absolute; left: 50%; top: 18px; transform: translateX(-50%); width: min(640px, calc(100% - 760px)); min-width: 340px; display: flex; flex-direction: column; gap: 4px; text-transform: uppercase; pointer-events: none; }
+#goal .g-bar { position: relative; height: 34px; background: rgba(0, 0, 0, 0.72); border: 2px solid rgba(255, 255, 255, 0.35); display: flex; align-items: center; justify-content: space-between; padding: 0 10px; font-size: 25px; overflow: hidden; }
+#goal .g-bar i { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, #7a1010, #d0302a); transition: width 0.6s; }
+#goal .g-bar.full i { background: linear-gradient(90deg, #0f6a2a, #3ad06a); }
+#goal .g-bar span { position: relative; text-shadow: 2px 2px 0 #000; }
+#goal .g-when { color: var(--debt); }
+#goal .g-next { font-size: 22px; background: rgba(0, 0, 0, 0.62); padding: 2px 10px; border-left: 4px solid var(--money); }
+#goal .g-streak { align-self: center; font-size: 24px; color: #ffb040; background: rgba(40, 10, 0, 0.8); padding: 0 12px; border: 1px solid #ff7a1a; box-shadow: 0 0 14px rgba(255, 120, 30, 0.6); animation: heat 0.5s infinite alternate; }
+#fieldinfo .hit { color: var(--mult); }
+#fieldinfo .why { font-size: 0.85em; opacity: 0.9; }
+.fit { color: var(--money); font-size: 0.8em; margin-left: 8px; }
+#score .calc { font-size: 26px; background: var(--vcr); padding: 0 14px; box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6); }
+.next-unlocks { display: flex; flex-direction: column; gap: 2px; font-size: 22px; max-width: 900px; margin: 6px auto; text-align: left; }
+.next-unlocks .t { color: var(--marks); }

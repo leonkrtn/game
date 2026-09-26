@@ -362,3 +362,28 @@ describe('table limits', () => {
     expect(run.tableMax).toBe(38);
   });
 });
+
+describe('streaks and hit preview', () => {
+  it('adds a growing, capped mult on a win streak and a token every third profit', () => {
+    const inp = input({ bets: { red: [10] } });
+    const at = idx(inp.wheel, 1);
+    expect(scoreSpin({ ...inp, winStreak: 0 }, at).mult).toBe(1);
+    expect(scoreSpin({ ...inp, winStreak: 2 }, at).mult).toBeCloseTo(1.2);
+    expect(scoreSpin({ ...inp, winStreak: 50 }, at).mult).toBeCloseTo(1.5);
+    expect(scoreSpin({ ...inp, winStreak: 2 }, at).marks).toBe(1);
+    expect(scoreSpin({ ...inp, winStreak: 1 }, at).marks).toBe(0);
+    // A loss pays nothing, streak or not.
+    expect(scoreSpin({ ...inp, winStreak: 2 }, idx(inp.wheel, 2)).payout).toBe(0);
+  });
+
+  it('previews the mult a hit would get', () => {
+    const run = new Run({ seed: 3 });
+    run.items = [{ uid: 1, def: 'kerze', counter: 0 }];
+    run.news = undefined;
+    expect(run.previewHit('red')?.max).toBe(2);
+    expect(run.previewHit('black')?.max).toBe(1);
+    const mixed = run.previewHit('doz0')!;
+    expect(mixed.min).toBe(1);
+    expect(mixed.max).toBe(2);
+  });
+});

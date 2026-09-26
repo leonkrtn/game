@@ -1,7 +1,8 @@
 import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_MOD_INFO, RARITY, RULES, SETS, STAGES } from '../game/content';
 import { FIELD_BY_ID, fieldWins, KIND_NAME } from '../game/fields';
 import type { Run } from '../game/run';
-import type { Line } from '../game/scoring';
+import { streakBonus, type Line } from '../game/scoring';
+import { buildFocus } from './guide';
 import type { ItemInstance, Pocket } from '../game/types';
 import { COLOR_NAME, POCKET_COUNT, standardColor } from '../game/wheel';
 import { $, fmt, fmtMult, h } from './dom';
@@ -133,6 +134,7 @@ export function renderScore(st?: ScoreState): void {
   const ticker = h('div', { class: 'ticker' });
   for (const l of st.lines.slice(-5)) ticker.append(h('div', { class: 't' }, h('span', { text: l.text }), h('span', { class: `a ${l.kind}`, text: lineAmount(l) })));
   box.replaceChildren(sum, mult, ticker);
+  if (st.result !== undefined && st.sum > 0) box.append(h('div', { class: 'calc num', text: `${fmt(st.sum)} × ${fmtMult(st.mult)} = ${fmt(Math.floor(st.sum * st.mult))}` }));
   if (st.result !== undefined) box.append(h('div', { class: 'result num ' + (st.result >= 0 ? 'plus' : 'minus'), text: (st.result >= 0 ? '+' : '−') + fmt(Math.abs(st.result)) }));
 }
 
@@ -249,6 +251,9 @@ export function renderSlip(run: Run, show: boolean): void {
     rows.push(h('div', { class: 'ev ' + (ev >= 0 ? 'plus' : 'minus'), text: `IM SCHNITT ${ev >= 0 ? '+' : '−'}${fmt(Math.abs(ev))} PRO DREH (${ev >= 0 ? '+' : '−'}${pct(Math.abs(o.ev) / Math.max(1, run.stakeTotal + run.riskStake))})` }));
     rows.push(h('div', { class: 'hint', text: 'Gewinn = Summe × Mult. Talismane erhöhen den Mult. Ohne Talismane verliert Roulette im Schnitt 2,7 %.' }));
   }
+  if (run.stats.winStreak > 0) rows.push(h('div', { class: 'boost', text: `SERIE ${run.stats.winStreak}: NÄCHSTER GEWINN +${fmtMult(streakBonus(run.stats.winStreak))} MULT` }));
+  const focus = buildFocus(run);
+  if (focus.length) rows.push(h('div', { class: 'boost', text: `DEIN BUILD ZAHLT AUF: ${focus.map((f) => f.focus).join(' · ')}` }));
   const boosts = boostLabels(run);
   if (boosts.length) rows.push(h('div', { class: 'boost', text: 'AKTIV: ' + boosts.join(' · ') }));
   if (run.duel) {
@@ -273,7 +278,7 @@ export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number
     return;
   }
   // Same field, same odds: only move the box instead of rebuilding it every frame.
-  const key = `${fieldId}|${run.stakeTotal}|${run.tableMax}|${chances ? chances.length : 0}`;
+  const key = `${fieldId}|${run.stakeTotal}|${run.tableMax}|${run.items.length}|${chances ? chances.length : 0}`;
   box.style.left = `${x}px`;
   box.style.top = `${y}px`;
   if (key === lastFieldKey && lastFieldChances === chances && !box.classList.contains('hidden')) return;
@@ -287,6 +292,13 @@ export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number
     h('div', { text: `QUOTE ${payout - 1}:1 (×${payout} ZURÜCK) · CHANCE ${pct(fieldChance(run, fieldId, chances))}${run.cubeField === fieldId ? ' · VERDREHT ×3' : ''}` }),
   );
   box.append(h('div', { text: `GESETZT ${fmt(stake)} VON MAX ${fmt(run.fieldMax(fieldId))}${stake ? ' · RECHTSKLICK ZURÜCK' : ''}` }));
+  // What a hit here would be worth with everything on the table, and why.
+  const hit = run.previewHit(fieldId);
+  if (hit) {
+    const range = hit.min === hit.max ? `×${fmtMult(hit.max)}` : `×${fmtMult(hit.min)} BIS ×${fmtMult(hit.max)}`;
+    box.append(h('div', { class: 'hit', text: `BEI TREFFER: MULT ${range}${hit.max > 1 ? '' : ' – NICHTS VERSTÄRKT DIESES FELD'}` }));
+    if (hit.lines.length) box.append(h('div', { class: 'why', text: hit.lines.slice(0, 4).map((l) => l.text).join(' · ') }));
+  }
   box.style.left = `${x}px`;
   box.style.top = `${y}px`;
   box.classList.remove('hidden');

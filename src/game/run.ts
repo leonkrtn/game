@@ -7,7 +7,7 @@ import { FIELD_BY_ID, fieldWins, isInsideCombo } from './fields';
 import { Rng } from './rng';
 import {
   activeItems, activeSets, hasSet, levelOf, luckOf, neighborIndices, noBoost, pocketWeights, scoreSpin, stakeOf, type Boost, type Perks,
-  type SpinResult,
+  type Line, type SpinResult,
 } from './scoring';
 import type { Bets, Color, ItemInstance, Pocket, ShopItem } from './types';
 import { standardColor, WHEEL_ORDER } from './wheel';
@@ -59,6 +59,9 @@ export interface RunStats {
   hops: number;
   lossStreak: number;
   maxLossStreak: number;
+  /** Profitable spins in a row; a loss with stakes on the table ends it. */
+  winStreak: number;
+  maxWinStreak: number;
   renumbers: number;
   maxItems: number;
   loansRepaid: number;
@@ -147,7 +150,7 @@ export class Run {
   history: { n: number; c: Color }[] = [];
   stats: RunStats = {
     spins: 0, bestWin: 0, totalWon: 0, maxMoney: 0, straightWins: 0, insideWins: 0, zeroHits: 0, hops: 0,
-    lossStreak: 0, maxLossStreak: 0, renumbers: 0, maxItems: 0, loansRepaid: 0, earlyPays: 0,
+    lossStreak: 0, maxLossStreak: 0, winStreak: 0, maxWinStreak: 0, renumbers: 0, maxItems: 0, loansRepaid: 0, earlyPays: 0,
     focusWins: 0, nearMisses: 0, repeats: 0, minCash: Infinity, hangups: 0, sameBetStreak: 0, bestSameBetStreak: 0,
     golds: 0, maxSets: 0, bribesOk: 0, bribesCaught: 0, riskWins: 0, duelWins: 0, duelLosses: 0, sharkRepaid: 0, smokes: 0,
   };
@@ -449,7 +452,7 @@ export class Run {
     return {
       wheel: this.wheel, bets: this.bets, items: this.items, rule: this.activeRule, isLastSpin,
       moneyBefore: this.moneyBefore, perks: this.perks, cubeField: this.cubeField,
-      lastNumber: this.history[0]?.n, lossStreak: this.stats.lossStreak, sameBets: this.sameAsLast(),
+      lastNumber: this.history[0]?.n, lossStreak: this.stats.lossStreak, winStreak: this.stats.winStreak, sameBets: this.sameAsLast(),
       news: this.news, ball: this.ball, boost: this.boost, highRisk: this.highRisk,
     };
   }
@@ -747,7 +750,29 @@ export class Run {
     s.maxSets = Math.max(s.maxSets, activeSets(this.items).length);
     s.lossStreak = r.stake > 0 && !r.anyWin ? s.lossStreak + 1 : r.anyWin ? 0 : s.lossStreak;
     s.maxLossStreak = Math.max(s.maxLossStreak, s.lossStreak);
+    if (r.stake > 0) s.winStreak = won > 0 ? s.winStreak + 1 : 0;
+    s.maxWinStreak = Math.max(s.maxWinStreak, s.winStreak);
   }
+
+  /** What a hit on `fieldId` would bring right now: the mult range over the pockets it wins on, and the lines behind the best case. */
+  previewHit(fieldId: string): { min: number; max: number; lines: Line[] } | undefined {
+    const f = FIELD_BY_ID[fieldId];
+    const bets = this.bets[fieldId] ? this.bets : { ...this.bets, [fieldId]: [1] };
+    const input = { ...this.input(this.roundsLeft === 1), bets };
+    let best: SpinResult | undefined;
+    let min = Infinity;
+    this.wheel.forEach((p, i) => {
+      if (!fieldWins(f, p)) return;
+      const r = scoreSpin(input, i);
+      if (!r.anyWin) return;
+      min = Math.min(min, r.mult);
+      if (!best || r.mult > best.mult) best = r;
+    });
+    if (!best) return undefined;
+    const top: SpinResult = best;
+    return { min, max: top.mult, lines: top.lines.filter((l) => l.kind === 'add' || l.kind === 'mul') };
+  }
+
 
   // ---- Cashier ------------------------------------------------------------
 

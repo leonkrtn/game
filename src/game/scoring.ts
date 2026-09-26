@@ -30,6 +30,8 @@ export interface SpinInput {
   lastNumber?: number;
   /** Rounds lost in a row before this one. */
   lossStreak?: number;
+  /** Spins in a row that ended with a profit, before this one. */
+  winStreak?: number;
   /** True when the bets equal last round's bets. */
   sameBets?: boolean;
   /** News flash of the current rate. */
@@ -90,6 +92,11 @@ export interface SpinResult {
   /** Set when luck made the ball hop into a better pocket. */
   hop?: { from: number; to: number };
 }
+
+/** Extra mult on the next win after `streak` profitable spins in a row. */
+export const STREAK_STEP = 0.1;
+export const STREAK_MAX = 0.5;
+export const streakBonus = (streak: number) => Math.min(STREAK_MAX, STREAK_STEP * streak);
 
 /** Most of a lost stake that refunds can give back. */
 export const MAX_REFUND = 0.9;
@@ -223,6 +230,8 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   if (input.ball === 'onyx' && pocket.color === 'black') add('Onyx', 1.5);
   if (input.ball === 'onyx' && pocket.color === 'red') add('Onyx', -0.5);
   if (input.boost?.korn) add('Doppelkorn', 2);
+  // A hot hand: every profitable spin in a row adds to the next win.
+  if (input.winStreak) add(`Serie ${input.winStreak}`, streakBonus(input.winStreak));
 
   const kinds = new Set(winners.map((w) => FIELD_BY_ID[w.fieldId].kind));
   const straightWin = winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight' && w.payout >= 18);
@@ -331,6 +340,13 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
       marks += n;
       lines.push({ kind: 'marks', text: 'Kupferkugel', amount: n });
     }
+  }
+
+  // Every third profitable spin in a row pays a luck token.
+  const streak = (input.winStreak ?? 0) + 1;
+  if (stake > 0 && payout > stake && streak % 3 === 0) {
+    marks += 1;
+    lines.push({ kind: 'marks', text: `Serie ${streak}`, amount: 1 });
   }
 
   return { pocket, bets: results, lines, stake, sum, mult, payout, marks, anyWin, growth, nearMiss };

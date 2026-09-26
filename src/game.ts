@@ -4,7 +4,7 @@ import { CONSUMABLES, ITEMS, NEWS, OFFERS, POCKET_ITEMS, RULES, SHARK_FACTOR, ty
 import { FIELD_BY_ID } from './game/fields';
 import { checkAchievements, loadProfile, lockedIds, recordRun, rewardName, saveProfile, type Profile } from './game/meta';
 import { Run, RUSH_SECONDS } from './game/run';
-import type { Line, SpinResult } from './game/scoring';
+import { streakBonus, type Line, type SpinResult } from './game/scoring';
 import { Input } from './input';
 import { $, fmt, fmtMult } from './ui/dom';
 import {
@@ -15,6 +15,7 @@ import {
   automatView, collectionView, controlsView, gameOverView, kasseView, overviewView, pauseView, phoneView, sharkView, startView, victoryView,
   vitrineView, wheelView,
 } from './ui/screens';
+import { renderGoal } from './ui/guide';
 import { ItemPreview } from './world/preview';
 import { World } from './world/world';
 
@@ -92,8 +93,8 @@ export class Game {
     'KLICK INS BILD UND SIEH DICH MIT DER MAUS UM. LAUF MIT <kbd>WASD</kbd> ZUM ROULETTETISCH UND DRÜCK <kbd>E</kbd>.',
     'KLICK AUF EIN FELD, UM DEN GEWÄHLTEN JETON ZU SETZEN. RECHTS STEHEN QUOTEN, CHANCEN UND DAS TISCHLIMIT.',
     '<kbd>LEER</kbd> DREHT DAS RAD. GEWINN = SUMME × MULT.',
-    'NACH 3 DREHS IST DIE RATE FÄLLIG. BEZAHL SIE AN DER KASSE (HINTEN RECHTS) – VORHER ODER WENN DIE HERREN KOMMEN.',
-    'DIE VITRINE (LINKS) VERKAUFT TALISMANE FÜR GLÜCKSMARKEN ◆. SIE ERHÖHEN DEN MULT – OHNE SIE GEWINNT DAS HAUS.',
+    'DER BALKEN OBEN ZEIGT DEINE RATE. NACH 3 DREHS WIRD SIE FÄLLIG – ZAHL AN DER KASSE HINTER DEM TISCH.',
+    'DIE VITRINE NEBEN DEM RAD VERKAUFT TALISMANE FÜR GLÜCKSMARKEN ◆. SIE ERHÖHEN DEN MULT – OHNE SIE GEWINNT DAS HAUS.',
   ];
 
   /** Shows the current tutorial hint, if any. */
@@ -256,6 +257,7 @@ export class Game {
     this.profile.lastBall = ball;
     saveProfile(this.profile);
     this.run = new Run({ kit, stage, ball, locked: lockedIds(this.profile) });
+    this.recordShown = false;
     this.world.setBall(ball);
     this.world.dismissShark();
     this.world.resetPlayer();
@@ -719,6 +721,7 @@ export class Game {
     $('timer').classList.add('hidden');
     renderSlip(this.run, false);
     const bribed = this.run.bribed;
+    this.streakBefore = this.run.stats.winStreak;
     this.tutorialDone(2);
     const r = this.run.spin();
     if (bribed && !this.run.bribePaid) {
@@ -859,6 +862,27 @@ export class Game {
     } else if (r.stake > 0) {
       sfx.lose();
     }
+    // Beating the best single win ever, once per run.
+    if (net > 0 && this.profile.bestWin > 0 && net > this.profile.bestWin && !this.recordShown) {
+      this.recordShown = true;
+      setTimeout(() => {
+        sfx.win(true);
+        toast(`NEUER REKORD! ${fmt(net)} – DEIN BISHER GRÖSSTER GEWINN WAR ${fmt(this.profile.bestWin)}.`, 'unlock');
+      }, 900);
+    }
+    const streak = this.run.stats.winStreak;
+    if (r.stake > 0 && net > 0 && streak >= 2) {
+      setTimeout(() => {
+        sfx.mult(streak + 2);
+        floater(`SERIE ${streak}! NÄCHSTER GEWINN +${fmtMult(streakBonus(streak))} MULT`, window.innerWidth / 2, window.innerHeight * 0.34, '#ffb040', 40);
+      }, 500);
+    } else if (r.stake > 0 && net <= 0 && this.streakBefore >= 2) {
+      setTimeout(() => toast(`SERIE GERISSEN NACH ${this.streakBefore} GEWINNEN.`), 500);
+    }
+    if (r.stake > 0 && r.payout === 0 && !r.nearMiss.length) {
+      const colour = r.pocket.color === 'red' ? 'ROT' : r.pocket.color === 'black' ? 'SCHWARZ' : 'GRÜN';
+      setTimeout(() => toast(`${r.pocket.number} ${colour} – KEINE DEINER WETTEN LAG DARAUF.`), 300);
+    }
     if (r.nearMiss.length) {
       floater(`KNAPP! DIE ${r.nearMiss[0]} LAG DIREKT DANEBEN.`, window.innerWidth / 2, window.innerHeight * 0.42, '#ffb0a0', 34);
     }
@@ -868,6 +892,8 @@ export class Game {
 
   private tension = false;
   private heartT = 0;
+  private streakBefore = 0;
+  private recordShown = false;
 
   private endSpin(): void {
     this.tension = false;
@@ -995,6 +1021,7 @@ export class Game {
     }
 
     $('crosshair').classList.toggle('hidden', !(this.mode === 'room' && !modalOpen()));
+    renderGoal(this.run, this.mode === 'room' && !modalOpen());
     if (Math.floor(this.tape * 2) !== this.hintTick) {
       this.hintTick = Math.floor(this.tape * 2);
       this.showHint();
@@ -1151,7 +1178,12 @@ export class Game {
     this.caughtTimer -= dt;
     if (this.caughtTimer <= 0 && this.mode === 'caught') {
       this.mode = 'over';
-      openModal(gameOverView(this.run, () => this.rewind()), 'black');
+      openModal(gameOverView(this.run, this.profile, () => {
+        closeModal();
+        this.world.distort(1.5);
+        sfx.rewind();
+        this.newRun(this.profile.lastKit, this.profile.lastStage, this.profile.lastBall);
+      }, () => this.rewind()), 'black');
     }
   }
 

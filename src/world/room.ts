@@ -13,7 +13,7 @@ export interface Casino {
   phoneLight: THREE.PointLight;
   /** Shows a headline in the late-night news on the TV. */
   setNews(headline: string): void;
-  /** Where background guests stand, facing the slot machines. */
+  /** Where background guests stand, at the bar. */
   guestSpots: { x: number; z: number; heading: number }[];
   /** Objects that fade out when they block the view onto the player. */
   occluders: THREE.Mesh[];
@@ -310,79 +310,11 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     scene.add(sign);
   }
 
-  // ---- Slot machines with little CRT reels -------------------------------------------
-  const guestSpots: Casino['guestSpots'] = [];
-  const slotScreens: { tex: THREE.CanvasTexture; g: CanvasRenderingContext2D; next: number; reels: number[] }[] = [];
-  const symbols = ['7', '♣', '$', '♦', 'BAR', '♥'];
-  const drawReels = (g: CanvasRenderingContext2D, reels: number[], blur: boolean) => {
-    g.fillStyle = '#0a0a12';
-    g.fillRect(0, 0, 256, 192);
-    reels.forEach((r, i) => {
-      const x = 16 + i * 80;
-      const grad = g.createLinearGradient(0, 20, 0, 172);
-      grad.addColorStop(0, '#444');
-      grad.addColorStop(0.5, '#f4f0e0');
-      grad.addColorStop(1, '#444');
-      g.fillStyle = grad;
-      g.fillRect(x, 20, 64, 152);
-      g.fillStyle = r % 2 ? '#c8102c' : '#101010';
-      g.font = `700 ${symbols[r].length > 1 ? 26 : 50}px Georgia, serif`;
-      g.textAlign = 'center';
-      g.textBaseline = 'middle';
-      if (blur) g.globalAlpha = 0.45;
-      g.fillText(symbols[r], x + 32, 96);
-      if (blur) g.fillText(symbols[(r + 1) % symbols.length], x + 32, 40);
-      g.globalAlpha = 1;
-    });
-    g.fillStyle = 'rgba(255,40,40,0.8)';
-    g.fillRect(0, 94, 256, 3);
-  };
-  const cabinetMat = phys({ color: 0x2a0a30, roughness: 0.35, metalness: 0.3, clearcoat: 0.8 });
-  for (let i = 0; i < 3; i++) {
-    const x = 0.9 + i * 1.05;
-    const g = new THREE.Group();
-    g.position.set(x, 0, ROOM.z0 + 0.45);
-    g.add(mesh(new RoundedBoxGeometry(0.8, 1.35, 0.7, 3, 0.05), cabinetMat, 0, 0.675, 0));
-    g.add(mesh(new RoundedBoxGeometry(0.72, 0.62, 0.55, 3, 0.05), cabinetMat, 0, 1.64, -0.05));
-    const [c, cg] = (() => {
-      const cv = document.createElement('canvas');
-      cv.width = 256;
-      cv.height = 192;
-      return [cv, cv.getContext('2d')!] as const;
-    })();
-    const reels = [i, i + 2, i + 4].map((k) => k % symbols.length);
-    drawReels(cg, reels, false);
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    const screen = mesh(new THREE.PlaneGeometry(0.52, 0.39), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }), 0, 1.66, 0.231, false);
-    screen.rotation.x = -0.12;
-    g.add(screen);
-    slotScreens.push({ tex, g: cg, next: Math.random() * 4, reels });
-    const topBox = mesh(new RoundedBoxGeometry(0.72, 0.22, 0.4, 2, 0.04), new THREE.MeshStandardMaterial({ color: 0x220000, emissive: [0xff2a4a, 0x27e3ff, 0xffb000][i], emissiveIntensity: 1.6 }), 0, 2.08, -0.05, false);
-    g.add(topBox);
-    g.add(mesh(new THREE.BoxGeometry(0.5, 0.08, 0.18), chrome, 0, 0.95, 0.38));
-    const lever = mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.45), chrome, 0.46, 1.4, 0.05);
-    lever.rotation.z = -0.15;
-    g.add(lever, mesh(new THREE.SphereGeometry(0.045, 14, 10), phys({ color: 0xc8102c, clearcoat: 1, roughness: 0.2 }), 0.49, 1.63, 0.05));
-    scene.add(g);
-    if (i !== 1) guestSpots.push({ x, z: ROOM.z0 + 1.25, heading: Math.PI });
-  }
-  updates.push((dt) => {
-    for (const s of slotScreens) {
-      s.next -= dt;
-      if (s.next < 0) {
-        const spinning = s.next > -1.2;
-        if (spinning) {
-          s.reels = s.reels.map(() => Math.floor(Math.random() * symbols.length));
-          drawReels(s.g, s.reels, true);
-        } else {
-          drawReels(s.g, s.reels, false);
-          s.next = 3 + Math.random() * 6;
-        }
-        s.tex.needsUpdate = true;
-      }
-    }
-  });
+  // Regulars leaning on the bar.
+  const guestSpots: Casino['guestSpots'] = [
+    { x: ROOM.x1 - 2.25, z: 3.3, heading: Math.PI / 2 },
+    { x: ROOM.x1 - 2.25, z: 4.4, heading: Math.PI / 2 },
+  ];
 
   // ---- Bar corner ------------------------------------------------------------------
   {
@@ -554,7 +486,6 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     const S = SMOKES;
     const g = new THREE.Group();
     g.position.set(S.x, 0, S.z);
-    g.rotation.y = -Math.PI / 2;
     const body = phys({ color: 0x7a0a10, roughness: 0.35, metalness: 0.4, clearcoat: 0.8, clearcoatRoughness: 0.25 });
     g.add(mesh(new RoundedBoxGeometry(S.halfD * 2, 1.82, S.halfW * 2 + 0.1, 3, 0.03), body, 0, 0.91, 0));
     // Glass front with rows of cigarette packs.

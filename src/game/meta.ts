@@ -31,42 +31,44 @@ export interface Achievement {
   /** Item or start-kit ids unlocked by it. */
   rewards: string[];
   check: (run: Run) => boolean;
+  /** Progress toward the goal in this run, for "almost there" hints: [current, target]. */
+  goal?: (run: Run) => [number, number];
 }
 
 export const ACHIEVEMENTS: Achievement[] = [
-  { id: 'rate1', name: 'Erste Rate', desc: 'Bezahle deine erste Rate.', rewards: ['glocke'], check: (r) => r.paidRates >= 1 },
-  { id: 'rate3', name: 'Stammgast', desc: 'Bezahle 3 Raten in einem Spiel.', rewards: ['gluckspilz', 'fernglas'], check: (r) => r.paidRates >= 3 },
-  { id: 'rate5', name: 'Alter Hase', desc: 'Bezahle 5 Raten in einem Spiel.', rewards: ['goldkugel'], check: (r) => r.paidRates >= 5 },
-  { id: 'frei', name: 'Frei!', desc: 'Bezahle alle 8 Raten.', rewards: ['teufel'], check: (r) => r.paidRates >= 8 },
+  { id: 'rate1', name: 'Erste Rate', desc: 'Bezahle deine erste Rate.', rewards: ['glocke'], check: (r) => r.paidRates >= 1, goal: (r) => [r.paidRates, 1] },
+  { id: 'rate3', name: 'Stammgast', desc: 'Bezahle 3 Raten in einem Spiel.', rewards: ['gluckspilz', 'fernglas'], check: (r) => r.paidRates >= 3, goal: (r) => [r.paidRates, 3] },
+  { id: 'rate5', name: 'Alter Hase', desc: 'Bezahle 5 Raten in einem Spiel.', rewards: ['goldkugel'], check: (r) => r.paidRates >= 5, goal: (r) => [r.paidRates, 5] },
+  { id: 'frei', name: 'Frei!', desc: 'Bezahle alle 8 Raten.', rewards: ['teufel'], check: (r) => r.paidRates >= 8, goal: (r) => [r.paidRates, 8] },
   { id: 'plein', name: 'Volltreffer', desc: 'Gewinne mit einem Plein (Einzelzahl).', rewards: ['winkekatze', 'zocker'], check: (r) => r.stats.straightWins >= 1 },
-  { id: 'tausend', name: 'Tausender', desc: 'Gewinne $1.000 Reingewinn in einer Runde.', rewards: ['spiegel'], check: (r) => r.stats.bestWin >= 1000 },
-  { id: 'zehntausend', name: 'Großer Fisch', desc: 'Gewinne $10.000 Reingewinn in einer Runde.', rewards: ['kristallkugel'], check: (r) => r.stats.bestWin >= 10000 },
+  { id: 'tausend', name: 'Tausender', desc: 'Gewinne $1.000 Reingewinn in einer Runde.', rewards: ['spiegel'], check: (r) => r.stats.bestWin >= 1000, goal: (r) => [r.stats.bestWin, 1000] },
+  { id: 'zehntausend', name: 'Großer Fisch', desc: 'Gewinne $10.000 Reingewinn in einer Runde.', rewards: ['kristallkugel'], check: (r) => r.stats.bestWin >= 10000, goal: (r) => [r.stats.bestWin, 10000] },
   { id: 'null', name: 'Null-Nummer', desc: 'Gewinne etwas, während die Kugel auf der 0 liegt.', rewards: ['totenkopf'], check: (r) => r.stats.zeroHits >= 1 },
-  { id: 'maler', name: 'Kunstmaler', desc: 'Nummeriere in einem Spiel 3 Fächer um.', rewards: ['magnet'], check: (r) => r.stats.renumbers >= 3 },
+  { id: 'maler', name: 'Kunstmaler', desc: 'Nummeriere in einem Spiel 3 Fächer um.', rewards: ['magnet'], check: (r) => r.stats.renumbers >= 3, goal: (r) => [r.stats.renumbers, 3] },
   { id: 'kredit', name: 'Kreditwürdig', desc: 'Nimm am Telefon frisches Geld an und zahle die Rate danach trotzdem.', rewards: ['zigarre'], check: (r) => r.stats.loansRepaid >= 1 },
-  { id: 'pech', name: 'Pechsträhne', desc: 'Verliere 3 Runden in Folge.', rewards: ['rabe'], check: (r) => r.stats.maxLossStreak >= 3 },
-  { id: 'voll', name: 'Vollgestellt', desc: 'Habe 5 Talismane gleichzeitig auf dem Tisch.', rewards: ['goldbarren'], check: (r) => r.stats.maxItems >= 5 },
+  { id: 'pech', name: 'Pechsträhne', desc: 'Verliere 3 Runden in Folge.', rewards: ['rabe'], check: (r) => r.stats.maxLossStreak >= 3, goal: (r) => [r.stats.maxLossStreak, 3] },
+  { id: 'voll', name: 'Vollgestellt', desc: 'Habe 5 Talismane gleichzeitig auf dem Tisch.', rewards: ['goldbarren'], check: (r) => r.stats.maxItems >= 5, goal: (r) => [r.stats.maxItems, 5] },
   { id: 'split', name: 'Feine Klinge', desc: 'Gewinne mit einem Cheval, Carré, einer Transversale oder Sechserreihe.', rewards: ['police'], check: (r) => r.stats.insideWins >= 1 },
-  { id: 'reich', name: 'Dagobert', desc: 'Besitze $5.000 (Bargeld und Einzahlung).', rewards: ['bankier'], check: (r) => r.stats.maxMoney >= 5000 },
-  { id: 'hops', name: 'Hüpf!', desc: 'Lass die Kugel 3-mal durch Glück nachhüpfen.', rewards: ['taschenuhr'], check: (r) => r.stats.hops >= 3 },
+  { id: 'reich', name: 'Dagobert', desc: 'Besitze $5.000 (Bargeld und Einzahlung).', rewards: ['bankier'], check: (r) => r.stats.maxMoney >= 5000, goal: (r) => [r.stats.maxMoney, 5000] },
+  { id: 'hops', name: 'Hüpf!', desc: 'Lass die Kugel 3-mal durch Glück nachhüpfen.', rewards: ['taschenuhr'], check: (r) => r.stats.hops >= 3, goal: (r) => [r.stats.hops, 3] },
   { id: 'frueh', name: 'Pünktlich', desc: 'Bezahle eine Rate vor der letzten Runde.', rewards: ['kleeblatt'], check: (r) => r.stats.earlyPays >= 1 },
-  { id: 'rate2', name: 'Durchhalter', desc: 'Bezahle 2 Raten in einem Spiel.', rewards: ['hasenpfote'], check: (r) => r.paidRates >= 2 },
+  { id: 'rate2', name: 'Durchhalter', desc: 'Bezahle 2 Raten in einem Spiel.', rewards: ['hasenpfote'], check: (r) => r.paidRates >= 2, goal: (r) => [r.paidRates, 2] },
   { id: 'fokus', name: 'Alles auf eine Karte', desc: 'Gewinne mit deinem ganzen Einsatz auf einem einzigen Feld.', rewards: ['walkman'], check: (r) => r.stats.focusWins >= 1 },
-  { id: 'knapp', name: 'Knapp daneben', desc: 'Liege dreimal mit einem Plein direkt neben der Kugel.', rewards: ['pager'], check: (r) => r.stats.nearMisses >= 3 },
+  { id: 'knapp', name: 'Knapp daneben', desc: 'Liege dreimal mit einem Plein direkt neben der Kugel.', rewards: ['pager'], check: (r) => r.stats.nearMisses >= 3, goal: (r) => [r.stats.nearMisses, 3] },
   { id: 'doppel', name: 'Déjà-vu', desc: 'Dieselbe Zahl fällt zweimal hintereinander.', rewards: ['polaroid'], check: (r) => r.stats.repeats >= 1 },
   { id: 'blank', name: 'Blank', desc: 'Hab einmal weniger als $5 Bargeld.', rewards: ['zippo'], check: (r) => r.stats.minCash < 5 },
   { id: 'auflegen', name: 'Nein danke', desc: 'Leg auf, wenn der Boss anruft.', rewards: ['voodoo'], check: (r) => r.stats.hangups >= 1 },
-  { id: 'gewohnheit', name: 'Gewohnheitstier', desc: 'Setze dreimal hintereinander genau dasselbe.', rewards: ['kassette'], check: (r) => r.stats.bestSameBetStreak >= 3 },
-  { id: 'reich2', name: 'Goldjunge', desc: 'Besitze $20.000 (Bargeld und Einzahlung).', rewards: ['goldkette'], check: (r) => r.stats.maxMoney >= 20000 },
+  { id: 'gewohnheit', name: 'Gewohnheitstier', desc: 'Setze dreimal hintereinander genau dasselbe.', rewards: ['kassette'], check: (r) => r.stats.bestSameBetStreak >= 3, goal: (r) => [r.stats.bestSameBetStreak, 3] },
+  { id: 'reich2', name: 'Goldjunge', desc: 'Besitze $20.000 (Bargeld und Einzahlung).', rewards: ['goldkette'], check: (r) => r.stats.maxMoney >= 20000, goal: (r) => [r.stats.maxMoney, 20000] },
   { id: 'stufe1', name: 'Stammkunde', desc: 'Bezahle eine Rate auf Schuldenstufe 1 oder höher.', rewards: ['zauberwuerfel'], check: (r) => r.stage >= 1 && r.paidRates >= 1 },
   { id: 'stufe3', name: 'Unantastbar', desc: 'Bezahle 4 Raten auf Schuldenstufe 3 oder höher.', rewards: ['sonnenbrille'], check: (r) => r.stage >= 3 && r.paidRates >= 4 },
   { id: 'gold1', name: 'Goldschmied', desc: 'Mach einen Talisman golden (zweites Exemplar kaufen).', rewards: ['glas'], check: (r) => r.stats.golds >= 1 },
   { id: 'set1', name: 'Sammler', desc: 'Stell ein komplettes Set aus drei Talismanen auf den Tisch.', rewards: ['elfenbein'], check: (r) => r.stats.maxSets >= 1 },
   { id: 'duell', name: 'High Noon', desc: 'Gewinne ein Duell gegen einen Stammgast.', rewards: ['onyx'], check: (r) => r.stats.duelWins >= 1 },
-  { id: 'schmiergeld', name: 'Schmiergeld', desc: 'Besteche den Croupier dreimal, ohne aufzufliegen.', rewards: ['kupfer'], check: (r) => r.stats.bribesOk >= 3 },
+  { id: 'schmiergeld', name: 'Schmiergeld', desc: 'Besteche den Croupier dreimal, ohne aufzufliegen.', rewards: ['kupfer'], check: (r) => r.stats.bribesOk >= 3, goal: (r) => [r.stats.bribesOk, 3] },
   { id: 'risiko', name: 'Alles oder nichts', desc: 'Gewinne einen Hochrisiko-Dreh.', rewards: ['blei'], check: (r) => r.stats.riskWins >= 1 },
   { id: 'hai', name: 'Mit Haien schwimmen', desc: 'Nimm das Geld vom Kredithai und bezahle danach eine Rate.', rewards: ['gezinkt'], check: (r) => r.stats.sharkRepaid >= 1 },
-  { id: 'raucher', name: 'Kettenraucher', desc: 'Kauf 4 Sachen am Zigarettenautomaten in einem Spiel.', rewards: ['espresso'], check: (r) => r.stats.smokes >= 4 },
+  { id: 'raucher', name: 'Kettenraucher', desc: 'Kauf 4 Sachen am Zigarettenautomaten in einem Spiel.', rewards: ['espresso'], check: (r) => r.stats.smokes >= 4, goal: (r) => [r.stats.smokes, 4] },
 ];
 
 const KEY = 'rien-ne-va-plus/profile/v1';
@@ -128,4 +130,15 @@ export function rewardName(id: string): string {
   if (BALLS[id]) return `Kugel „${BALLS[id].name}"`;
   if (CONSUMABLES[id]) return `Automat: ${CONSUMABLES[id].name}`;
   return id;
+}
+
+/** Locked achievements closest to done after this run, with progress where it can be counted. */
+export function nearestUnlocks(p: Profile, run: Run, n = 3): { a: Achievement; have?: number; need?: number }[] {
+  return ACHIEVEMENTS.filter((a) => !p.done.includes(a.id))
+    .map((a) => {
+      const g = a.goal?.(run);
+      return { a, have: g?.[0], need: g?.[1], share: g ? Math.min(0.99, g[0] / g[1]) : 0.01 };
+    })
+    .sort((x, y) => y.share - x.share)
+    .slice(0, n);
 }

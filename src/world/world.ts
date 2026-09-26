@@ -26,8 +26,8 @@ import { Wheel3D } from './wheel3d';
 
 const CHIP_H = 0.0105;
 const CHIP_R = 0.0195;
-const WALK = 1.7;
-const SPRINT = 3.6;
+const WALK = 1.87;
+const SPRINT = 3.96;
 const PLAYER_R = 0.3;
 const PERSON_R = 0.28;
 
@@ -529,7 +529,7 @@ export class World {
       { id: 'kasse', x: KASSE.x, z: KASSE.z + KASSE.halfD, reach: 1.9 },
       { id: 'vitrine', x: VITRINE.x + VITRINE.halfW, z: VITRINE.z, reach: 1.8 },
       { id: 'phone', x: PHONE.x, z: PHONE.z, reach: 1.6 },
-      { id: 'smokes', x: SMOKES.x - SMOKES.halfW, z: SMOKES.z, reach: 1.6 },
+      { id: 'smokes', x: SMOKES.x, z: SMOKES.z + SMOKES.halfW, reach: 1.6 },
       // The table's nearest edge point, so it can be used from its whole long side.
       { id: 'table', x: THREE.MathUtils.clamp(p.x, t.x - t.halfW + 0.3, t.x + t.halfW), z: THREE.MathUtils.clamp(p.z, t.z - t.halfD, t.z + t.halfD), reach: 1.25 },
     ];
@@ -1340,7 +1340,7 @@ export class World {
         look.set(PHONE.x, PHONE.y, PHONE.z);
         break;
       case 'smokes':
-        pos.set(SMOKES_SPOT.x - 0.2, this.eyeHeight, SMOKES_SPOT.z + 0.2);
+        pos.set(SMOKES_SPOT.x + 0.2, this.eyeHeight, SMOKES_SPOT.z + 0.2);
         look.set(SMOKES.x, 1.2, SMOKES.z);
         break;
       case 'shark': {
