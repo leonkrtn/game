@@ -6,11 +6,13 @@ export class Input {
   constructor() {
     window.addEventListener('keydown', (e) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
-      if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-      if (!e.repeat) this.pressed.push(e.code);
-      this.down.add(e.code);
+      if (['Space', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+      // Q does everything Esc does, for browsers where Esc always leaves fullscreen.
+      const code = e.code === 'KeyQ' ? 'Escape' : e.code;
+      if (!e.repeat) this.pressed.push(code);
+      this.down.add(code);
     });
-    window.addEventListener('keyup', (e) => this.down.delete(e.code));
+    window.addEventListener('keyup', (e) => this.down.delete(e.code === 'KeyQ' ? 'Escape' : e.code));
     window.addEventListener('blur', () => this.down.clear());
   }
 

@@ -196,7 +196,7 @@ export class World {
     this.scene.remove(cubeCam);
   }
 
-  private resize(): void {
+  resize(): void {
     const w = window.innerWidth, h = window.innerHeight;
     this.renderer.setSize(w, h);
     this.composer.setSize(w, h);

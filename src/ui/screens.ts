@@ -154,6 +154,16 @@ export interface StartHandlers {
   controls(): void;
   toggleSound(): boolean;
   graphics(q: Profile['quality']): void;
+  fullscreen(): Promise<boolean>;
+}
+
+/** Menu row that switches fullscreen and shows its state. */
+function fullscreenRow(toggle: () => Promise<boolean>, onHover?: () => void): HTMLButtonElement {
+  const on = () => !!(document.fullscreenElement ?? (document as Document & { webkitFullscreenElement?: Element }).webkitFullscreenElement);
+  const b = row('VOLLBILD <kbd>F</kbd>', on() ? 'AN' : 'AUS', () => {
+    void toggle().then((v) => ((b.lastElementChild as HTMLElement).textContent = v ? 'AN' : 'AUS'));
+  }, { onHover });
+  return b;
 }
 
 const GRAPHICS: Profile['quality'][] = ['auto', 'high', 'medium', 'low'];
@@ -226,6 +236,7 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
       row('SAMMLUNG', `${profile.done.length}/${ACHIEVEMENTS.length}`, hd.collection),
       row('STEUERUNG', '', hd.controls),
       graphics,
+      fullscreenRow(hd.fullscreen, () => (info.textContent = 'Vollbild mit F. In Chrome bleibt Esc im Spiel; in Safari nimm Q statt Esc – oder den grünen Fensterknopf (ctrl+cmd+F), den Esc nicht verlässt.')),
       sound,
     ),
     info,
@@ -256,7 +267,8 @@ export function controlsView(back: () => void): HTMLElement {
     ['MAUS', 'UMSEHEN (INS BILD KLICKEN), ODER ZIEHEN'],
     ['WASD / ↑↓', 'LAUFEN, SHIFT RENNT'],
     ['← →', 'DREHEN OHNE MAUS'],
-    ['ESC / P', 'PAUSE, EINSTELLUNGEN'],
+    ['ESC / Q / P', 'PAUSE, EINSTELLUNGEN, ZURÜCK'],
+    ['F', 'VOLLBILD AN/AUS'],
     ['E', 'TISCH, KASSE, VITRINE, TELEFON, AUTOMAT'],
     ['TAB', 'ÜBERSICHT: TALISMANE, SETS, TASCHE, BONI'],
     ['LINKSKLICK', 'JETON SETZEN – AUCH AUF LINIEN UND ECKEN'],
@@ -441,6 +453,7 @@ export interface PauseHandlers {
   controls(): void;
   mouse(step: number): number;
   graphics(q: Profile['quality']): void;
+  fullscreen(): Promise<boolean>;
   toggleSound(): boolean;
   toggleMusic(): boolean;
   quit(): void;
@@ -473,6 +486,7 @@ export function pauseView(profile: Profile, soundOn: boolean, hd: PauseHandlers)
       row('▶ WEITER', '', hd.resume),
       row('MAUS-EMPFINDLICHKEIT', mouseValue, () => stepMouse(1), { onStep: stepMouse }),
       row('GRAFIK', gfxValue, () => stepGfx(1), { onStep: stepGfx }),
+      fullscreenRow(hd.fullscreen),
       sound,
       music,
       row('STEUERUNG', '', hd.controls),

@@ -5,6 +5,7 @@ import { FIELD_BY_ID } from './game/fields';
 import { checkAchievements, loadProfile, lockedIds, recordRun, rewardName, saveProfile, type Profile } from './game/meta';
 import { Run, RUSH_SECONDS } from './game/run';
 import { streakBonus, type Line, type SpinResult } from './game/scoring';
+import { canLockEscape, toggleFullscreen, watchFullscreen } from './fullscreen';
 import { Input } from './input';
 import { $, fmt, fmtMult } from './ui/dom';
 import {
@@ -61,6 +62,7 @@ export class Game {
         return this.profile.mouse;
       },
       graphics: (q) => this.setGraphics(q),
+      fullscreen: () => this.toggleFs(),
       toggleSound: () => {
         sfx.muted = !sfx.muted;
         return !sfx.muted;
@@ -78,6 +80,14 @@ export class Game {
         this.rewind();
       },
     }), 'vcr', () => this.closePause());
+  }
+
+  /** Fullscreen on and off (F, or the menus). Esc stays with the game where the browser allows it. */
+  private async toggleFs(): Promise<boolean> {
+    sfx.select();
+    const on = await toggleFullscreen();
+    if (on) toast(canLockEscape() ? 'VOLLBILD. ESC BLEIBT IM SPIEL – ZUM VERLASSEN ESC GEDRÜCKT HALTEN ODER F.' : 'VOLLBILD. DEIN BROWSER VERLÄSST ES MIT ESC – NIMM Q STATT ESC, F BEENDET ES.');
+    return on;
   }
 
   private closePause(): void {
@@ -178,6 +188,11 @@ export class Game {
       if (list[j]) this.selectChip(list[j]);
     }, { passive: true });
     window.addEventListener('keydown', () => sfx.unlock(), { once: true });
+    // The browser dropped out of fullscreen by itself (Esc in Safari): pause like Esc would.
+    watchFullscreen(() => {
+      if (this.mode === 'room' && !modalOpen()) this.openPause();
+      toast('VOLLBILD VERLASSEN – <kbd>F</kbd> FÜR VOLLBILD, <kbd>Q</kbd> STATT ESC.');
+    }, () => this.world.resize());
     void this.boot();
   }
 
@@ -244,6 +259,7 @@ export class Game {
       start: (kit, stage, ball) => this.newRun(kit, stage, ball),
       collection: () => openModal(collectionView(this.profile, () => this.showStart()), 'vcr'),
       controls: () => openModal(controlsView(() => this.showStart()), 'vcr'),
+      fullscreen: () => this.toggleFs(),
       toggleSound: () => {
         sfx.muted = !sfx.muted;
         return !sfx.muted;
@@ -1080,6 +1096,7 @@ export class Game {
     this.watchPerformance(Math.min(raw, 1));
     const presses = this.input.takePresses();
 
+    if (presses.includes('KeyF')) void this.toggleFs();
     if (presses.includes('KeyM')) {
       sfx.muted = !sfx.muted;
       toast(sfx.muted ? 'TON AUS' : 'TON AN');
