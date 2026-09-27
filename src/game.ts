@@ -1310,7 +1310,7 @@ export class Game {
 
     $('crosshair').classList.toggle('hidden', !(this.mode === 'room' && !modalOpen()));
     renderGoal(this.run, this.mode === 'room' && !modalOpen());
-    renderBoard(this.run, (this.mode === 'room' || this.mode === 'table' || this.mode === 'spinning') && !!this.run && this.run.phase !== 'gameover', this.mode === 'spinning');
+    renderBoard(this.run, (this.mode === 'room' || this.mode === 'table' || this.mode === 'spinning') && !modalOpen() && !!this.run && this.run.phase !== 'gameover', this.mode === 'spinning');
     if (Math.floor(this.tape * 2) !== this.hintTick) {
       this.hintTick = Math.floor(this.tape * 2);
       this.showHint();

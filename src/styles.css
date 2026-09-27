@@ -327,25 +327,6 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .draft { display: flex; flex-direction: column; align-items: center; gap: 14px; margin-top: auto; margin-bottom: 5vh; width: min(1100px, 100%); text-transform: uppercase; }
 .draft .baron { color: var(--luck); font-size: 30px; text-align: center; text-transform: none; max-width: 900px; }
 .draft .sub { font-size: 22px; opacity: 0.8; }
-.cards { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; perspective: 900px; }
-.card { width: 230px; min-height: 330px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 14px 18px; background: linear-gradient(170deg, #22121a, #0a0508); border: 3px solid #c9a04a; border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), inset 0 0 0 5px #0a0508, inset 0 0 0 6px rgba(201, 160, 74, 0.5); color: #f4ead0; font-family: inherit; cursor: pointer; text-transform: uppercase; animation: dealCard 0.5s both; transition: transform 0.15s, box-shadow 0.15s; position: relative; }
-.card:hover, .card.sel { transform: translateY(-10px) rotate(-1deg); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(255, 210, 74, 0.5), inset 0 0 0 5px #0a0508, inset 0 0 0 6px rgba(201, 160, 74, 0.8); }
-.card .kind { font-size: 17px; letter-spacing: 0.1em; opacity: 0.8; }
-.card .art { width: 120px; height: 120px; display: grid; place-items: center; font-size: 64px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 210, 120, 0.25), transparent 70%); color: #ffd24a; text-shadow: 0 0 18px rgba(255, 180, 60, 0.8); }
-.card .art.fig { width: 150px; height: 150px; }
-.card .art.fig img { width: 150px; height: 150px; filter: drop-shadow(0 6px 10px rgba(0,0,0,.7)); }
-.card.k-talisman .art { background: radial-gradient(circle, rgba(255, 220, 150, 0.3), transparent 70%); }
-.card .chipart { width: 88px; height: 88px; border-radius: 50%; background: radial-gradient(circle, var(--c) 0 46%, var(--r) 47% 52%, var(--c) 53% 100%); border: 8px dashed var(--r); box-shadow: 0 0 20px var(--r); }
-.card .name { font-size: 28px; line-height: 1; text-align: center; }
-.card .desc { font-size: 19px; text-transform: none; text-align: center; opacity: 0.92; line-height: 1.15; }
-.card .key { position: absolute; top: 8px; right: 10px; font-size: 18px; opacity: 0.6; }
-.card.rar-rare { border-color: #7fb8ff; }
-.card.rar-legendary { border-color: #ff5ad0; animation: dealCard 0.5s both, legend 1.6s ease-in-out infinite alternate; }
-.card.k-baron { background: linear-gradient(170deg, #2a0a0a, #0a0303); }
-.card.k-rad .art { color: #ff7a2f; }
-.card.k-schummel .art { color: #9ad0ff; }
-@keyframes dealCard { from { opacity: 0; transform: translateY(80px) rotateY(90deg); } to { opacity: 1; transform: none; } }
-@keyframes legend { from { box-shadow: 0 10px 30px rgba(0,0,0,.7), 0 0 10px #ff5ad0; } to { box-shadow: 0 10px 30px rgba(0,0,0,.7), 0 0 28px #ff5ad0; } }
 
 /* Bonus wheel. */
 .bonuswheel { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: auto; text-transform: uppercase; cursor: pointer; }
@@ -414,3 +395,80 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 #board .b-n.black b { background: #141414; outline: 1px solid #555; }
 #board .b-n.green b { background: #11804a; }
 #board .b-n i { font-style: normal; font-size: 15px; }
+
+
+/* ---- Draft cards: four tiers, from plain to legendary ---------------------------------------- */
+@property --ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.cards { gap: 26px; perspective: 1100px; }
+.card {
+  --edge: #9a9aa2; --edge2: #5c5c64; --glow: rgba(200, 200, 210, 0); --ink: #ece6d6; --tint: #6c6c78;
+  --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 30%;
+  position: relative; width: 240px; min-height: 360px; padding: 4px; border: 0; border-radius: 14px; cursor: pointer;
+  font-family: inherit; color: var(--ink); text-transform: uppercase; text-shadow: none;
+  background: linear-gradient(160deg, var(--edge), var(--edge2) 55%, var(--edge));
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 0, 0, 0.8), 0 0 26px var(--glow);
+  transform: rotateX(var(--rx)) rotateY(var(--ry));
+  transform-style: preserve-3d;
+  transition: transform 0.12s ease-out, box-shadow 0.2s, translate 0.2s;
+  animation: dealCard 0.6s cubic-bezier(.2, .9, .3, 1.2) backwards;
+}
+.card:hover, .card.sel { translate: 0 -14px; box-shadow: 0 26px 44px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(0, 0, 0, 0.8), 0 0 40px var(--glow), 0 0 0 3px #fff6; }
+.card .c-face {
+  position: relative; height: 100%; min-height: 352px; border-radius: 11px; overflow: hidden;
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px 12px;
+  background: radial-gradient(120% 70% at 50% 0%, color-mix(in srgb, var(--tint) 35%, #140a10), #0b0609 70%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 -30px 40px rgba(0, 0, 0, 0.5);
+}
+.card .c-top { display: flex; justify-content: space-between; align-items: center; font-size: 15px; letter-spacing: 0.12em; color: color-mix(in srgb, var(--edge) 70%, #fff); }
+.card .c-key { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; border: 1px solid currentColor; font-size: 15px; letter-spacing: 0; }
+.card .c-art {
+  position: relative; height: 150px; border-radius: 8px; display: grid; place-items: center; overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 55%, color-mix(in srgb, var(--tint) 55%, transparent), transparent 62%),
+    repeating-conic-gradient(from 0deg at 50% 55%, rgba(255, 255, 255, 0.05) 0 8deg, transparent 8deg 16deg),
+    linear-gradient(#1a0f14, #0a0508);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--edge) 60%, #000), inset 0 0 24px rgba(0, 0, 0, 0.8);
+}
+.card .c-art img { width: 150px; height: 150px; filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.8)); transform: translateZ(30px); }
+.card .c-glyph { font-size: 70px; line-height: 1; color: color-mix(in srgb, var(--tint) 60%, #fff); text-shadow: 0 0 18px var(--tint), 0 4px 0 rgba(0, 0, 0, 0.6); }
+.card .c-foil { position: absolute; inset: 0; pointer-events: none; opacity: 0; mix-blend-mode: color-dodge; }
+.card .c-tier {
+  align-self: center; margin-top: -18px; padding: 1px 14px; font-size: 16px; letter-spacing: 0.2em; position: relative; z-index: 1;
+  color: #0b0609; background: linear-gradient(90deg, var(--edge2), var(--edge), var(--edge2));
+  clip-path: polygon(8px 0, calc(100% - 8px) 0, 100% 50%, calc(100% - 8px) 100%, 8px 100%, 0 50%);
+}
+.card .c-name { font-size: 28px; line-height: 0.95; text-align: center; color: #fff; text-wrap: balance; }
+.card .c-desc { flex: 1; font-size: 18px; line-height: 1.15; text-transform: none; text-align: center; padding: 6px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.35); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); opacity: 0.95; }
+.card .c-gems { display: flex; justify-content: center; gap: 7px; }
+.card .c-gems i { width: 10px; height: 10px; transform: rotate(45deg); background: var(--edge); box-shadow: 0 0 6px var(--edge); }
+.card .c-gems i.off { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--edge) 50%, transparent); }
+/* Light that follows the pointer. */
+.card .c-shine { position: absolute; inset: 4px; border-radius: 11px; pointer-events: none; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, 0.22), transparent 45%); opacity: 0; transition: opacity 0.2s; }
+.card:hover .c-shine, .card.sel .c-shine { opacity: 1; }
+
+/* Kinds tint the art. */
+.card.k-deal { --tint: #3fbf7f; }
+.card.k-talisman { --tint: #e0a040; }
+.card.k-rad { --tint: #ff7a2f; }
+.card.k-kugel { --tint: #d8d8f0; }
+.card.k-schummel { --tint: #5ab8ff; }
+.card.k-baron { --tint: #d0243a; }
+
+/* Tiers. */
+.card.t-common { --edge: #b8b4aa; --edge2: #6a665e; }
+.card.t-rare { --edge: #7fc0ff; --edge2: #2a5c9a; --glow: rgba(90, 170, 255, 0.35); }
+.card.t-epic { --edge: #c98cff; --edge2: #5a2a9a; --glow: rgba(180, 100, 255, 0.55); }
+.card.t-epic, .card.t-legendary { background: conic-gradient(from var(--ang), var(--edge2), var(--edge), #fff8, var(--edge), var(--edge2), var(--edge), var(--edge2)); animation: dealCard 0.6s cubic-bezier(.2, .9, .3, 1.2) backwards, edgeSpin 4s linear infinite; }
+.card.t-epic .c-foil { opacity: 0.35; background: linear-gradient(115deg, transparent 30%, rgba(200, 140, 255, 0.7) 45%, transparent 60%); background-size: 250% 100%; animation: foil 3.2s ease-in-out infinite; }
+.card.t-legendary { --edge: #ffd23a; --edge2: #b8560e; --glow: rgba(255, 190, 60, 0.75); animation: dealCard 0.6s cubic-bezier(.2, .9, .3, 1.2) backwards, edgeSpin 2.6s linear infinite, legendPulse 1.6s ease-in-out infinite alternate; }
+.card.t-legendary .c-foil { opacity: 0.55; background: linear-gradient(115deg, transparent 25%, #ff5ad0 38%, #ffd23a 46%, #5affc8 54%, #5aa0ff 62%, transparent 75%); background-size: 300% 100%; animation: foil 2.4s linear infinite; }
+.card.t-legendary .c-face::after { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: radial-gradient(circle, #fff 0 1px, transparent 2px), radial-gradient(circle, #ffe9a0 0 1px, transparent 2px); background-size: 37px 41px, 53px 47px; background-position: 0 0, 19px 23px; animation: sparkle 3s linear infinite; opacity: 0.5; mix-blend-mode: screen; }
+.card.t-legendary .c-name { color: #ffe39a; text-shadow: 0 0 12px rgba(255, 190, 60, 0.8); }
+.card.t-epic .c-name { color: #ecd6ff; text-shadow: 0 0 10px rgba(180, 100, 255, 0.7); }
+.card.fuse .c-art { box-shadow: inset 0 0 0 2px #ffd23a, inset 0 0 30px rgba(255, 200, 60, 0.4); }
+@keyframes dealCard { from { opacity: 0; transform: translateY(90px) rotateY(180deg) scale(0.8); } to { opacity: 1; transform: rotateX(var(--rx)) rotateY(var(--ry)); } }
+@keyframes edgeSpin { to { --ang: 360deg; } }
+@keyframes foil { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@keyframes sparkle { from { background-position: 0 0, 19px 23px; } to { background-position: 0 -82px, 19px -71px; } }
+@keyframes legendPulse { from { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.75), 0 0 16px var(--glow); } to { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.75), 0 0 46px var(--glow); } }
+@media (max-width: 800px) { .card { width: 200px; min-height: 320px; } .card .c-face { min-height: 312px; } .card .c-art { height: 120px; } .card .c-art img { width: 120px; height: 120px; } }

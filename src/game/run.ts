@@ -4,7 +4,7 @@ import {
   type PocketToolId, type RuleId,
 } from './content';
 import { FIELD_BY_ID, fieldWins, isInsideCombo } from './fields';
-import { BONUS_SEGMENTS, BOSS_DUEL_DISCOUNT, CARDS, CAUGHT_PENALTY, SKIP_DRAFT_MARKS, SUSPICION, TALISMAN_CARD_WEIGHT } from './extras';
+import { BONUS_SEGMENTS, BOSS_DUEL_DISCOUNT, CARD_TIER, CARDS, CAUGHT_PENALTY, SKIP_DRAFT_MARKS, SUSPICION, TALISMAN_CARD_WEIGHT } from './extras';
 import { Rng } from './rng';
 import {
   activeItems, activeSets, hasSet, levelOf, luckOf, neighborIndices, noBoost, pocketWeights, scoreSpin, stakeOf, type Boost, type Perks,
@@ -1046,7 +1046,7 @@ export class Run {
       // No card that would do nothing: a full table, a magnet already muffled, fingers already quick.
       .filter((c) => !(c.id === 'platz' && this.perks.slots >= MAX_SLOTS) && !(c.id === 's_magnet' && this.magnetCost < 1)
         && !(c.id === 's_finger' && this.nudgeZone >= 0.4))
-      .map((c) => ({ id: c.id, w: c.weight * (c.rarity === 'legendary' ? 0.5 : 1) }));
+      .map((c) => ({ id: c.id, w: c.weight * CARD_TIER[c.rarity].weight }));
     const out: string[] = [];
     // One card is always a talisman (when one fits), one a wheel upgrade: the build keeps growing.
     const t = this.randomTalisman();

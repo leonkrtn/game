@@ -3,7 +3,7 @@ import {
   STAGES, START_KITS, type PocketToolId,
 } from '../game/content';
 import { desktop, isFullscreen } from '../fullscreen';
-import { BARON, BONUS_SEGMENTS, CARD_KIND_NAME, cardDef, type BonusSegment } from '../game/extras';
+import { BARON, BONUS_SEGMENTS, CARD_KIND_NAME, CARD_TIER, cardDef, cardTier, type BonusSegment } from '../game/extras';
 import { ACHIEVEMENTS, nearestUnlocks, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
@@ -100,31 +100,49 @@ export function draftView(run: Run, line: string, choose: (i: number) => void, s
   const cards = h('div', { class: 'cards' });
   run.draft.forEach((id, i) => {
     const c = cardDef(id);
-    const card = h('button', { class: `card k-${c.kind} rar-${c.rarity}`, onclick: () => choose(i) });
-    card.style.animationDelay = `${0.15 + i * 0.18}s`;
+    // A talisman you already own turns golden instead, one tier higher.
+    const def = c.kind === 'talisman' ? id.slice(2) : '';
+    const fuse = !!def && run.items.some((t) => t.def === def && !t.gold) && canFuse(def);
+    const desc = fuse ? `Deiner wird golden: ${GOLD_DESC[def].replace(' (aktuell +{n})', '')}` : c.desc;
+    const tier = cardTier(c, fuse);
+    const info = CARD_TIER[tier];
+    const card = h('button', { class: `card t-${tier} k-${c.kind}${fuse ? ' fuse' : ''}`, onclick: () => choose(i) });
+    card.style.animationDelay = `${0.15 + i * 0.2}s`;
     card.addEventListener('mouseenter', () => {
       document.querySelectorAll('#modal .sel').forEach((r) => r.classList.remove('sel'));
       card.classList.add('sel');
     });
-    const art = h('div', { class: 'art', text: CARD_GLYPH[c.kind] });
+    // The card tilts towards the pointer and the light follows it.
+    card.addEventListener('mousemove', (e) => {
+      const r = card.getBoundingClientRect();
+      const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+      card.style.setProperty('--mx', `${x * 100}%`);
+      card.style.setProperty('--my', `${y * 100}%`);
+      card.style.setProperty('--ry', `${(x - 0.5) * 16}deg`);
+      card.style.setProperty('--rx', `${(0.5 - y) * 12}deg`);
+    });
+    card.addEventListener('mouseleave', () => {
+      card.style.removeProperty('--ry');
+      card.style.removeProperty('--rx');
+    });
+    const art = h('div', { class: 'c-art' });
     // Talisman cards show the figurine itself, rendered once into a picture.
     if (c.kind === 'talisman') {
-      art.textContent = '';
-      art.classList.add('fig');
       const img = h('img', {}) as HTMLImageElement;
-      img.src = figurineSnapshot(id.slice(2));
+      img.src = figurineSnapshot(def);
       art.append(img);
-    }
-    // A talisman you already own turns golden instead.
-    const def = c.kind === 'talisman' ? id.slice(2) : '';
-    const fuse = def && run.items.some((t) => t.def === def && !t.gold) && canFuse(def);
-    const desc = fuse ? `Deiner wird golden: ${GOLD_DESC[def].replace(' (aktuell +{n})', '')}` : c.desc;
+    } else art.append(h('span', { class: 'c-glyph', text: CARD_GLYPH[c.kind] }));
+    art.append(h('i', { class: 'c-foil' }));
     card.append(
-      h('div', { class: 'kind', text: fuse ? 'TALISMAN · GOLDEN' : CARD_KIND_NAME[c.kind].toUpperCase() }),
-      art,
-      h('div', { class: 'name', text: c.name }),
-      h('div', { class: 'desc', text: desc }),
-      h('div', { class: 'key', text: String(i + 1) }),
+      h('div', { class: 'c-face' },
+        h('div', { class: 'c-top' }, h('span', { class: 'c-kind', text: (fuse ? 'Talisman · golden' : CARD_KIND_NAME[c.kind]).toUpperCase() }), h('span', { class: 'c-key', text: String(i + 1) })),
+        art,
+        h('div', { class: 'c-tier', text: info.name.toUpperCase() }),
+        h('div', { class: 'c-name', text: c.name }),
+        h('div', { class: 'c-desc', text: desc }),
+        h('div', { class: 'c-gems', html: '<i></i>'.repeat(info.gems) + '<i class="off"></i>'.repeat(4 - info.gems) }),
+      ),
+      h('i', { class: 'c-shine' }),
     );
     cards.append(card);
   });

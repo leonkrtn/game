@@ -13,8 +13,18 @@ export interface CardDef {
   desc: string;
   kind: CardKind;
   weight: number;
-  rarity: 'common' | 'rare' | 'legendary';
+  rarity: CardTier;
 }
+
+/** The four card tiers, from plain to legendary. */
+export type CardTier = 'common' | 'rare' | 'epic' | 'legendary';
+
+export const CARD_TIER: Record<CardTier, { name: string; gems: number; weight: number }> = {
+  common: { name: 'Normal', gems: 1, weight: 1 },
+  rare: { name: 'Selten', gems: 2, weight: 0.85 },
+  epic: { name: 'Episch', gems: 3, weight: 0.65 },
+  legendary: { name: 'Legendär', gems: 4, weight: 0.45 },
+};
 
 export const CARD_KIND_NAME: Record<CardKind, string> = {
   deal: 'Vorteil',
@@ -29,27 +39,27 @@ export const CARDS: Record<string, CardDef> = Object.fromEntries(([
   // Lasting advantages (the old phone deals).
   { id: 'glueck', name: 'Ein gutes Wort', desc: 'Glück +1, dauerhaft.', kind: 'deal', weight: 3, rarity: 'common' },
   { id: 'zinsen', name: 'Bessere Konditionen', desc: 'Zinsen auf deine Einzahlung +3 %, dauerhaft.', kind: 'deal', weight: 2, rarity: 'common' },
-  { id: 'platz', name: 'Mehr Platz am Tisch', desc: '+1 Platz für Talismane.', kind: 'deal', weight: 2, rarity: 'rare' },
+  { id: 'platz', name: 'Mehr Platz am Tisch', desc: '+1 Platz für Talismane.', kind: 'deal', weight: 2, rarity: 'epic' },
   { id: 'marken', name: 'Ein Bündel Marken', desc: '+4 Glücksmarken.', kind: 'deal', weight: 3, rarity: 'common' },
   { id: 'runde', name: 'Mehr Zeit', desc: '+1 Dreh vor jeder Rate, dauerhaft.', kind: 'deal', weight: 1, rarity: 'legendary' },
-  { id: 'vip', name: 'Ein Wort beim Saalchef', desc: 'Tischlimit +50 %, dauerhaft.', kind: 'deal', weight: 3, rarity: 'common' },
-  { id: 'rotplus', name: 'Rote Tinte', desc: 'Kugel auf Rot: +0,5 Mult, dauerhaft.', kind: 'deal', weight: 2, rarity: 'common' },
-  { id: 'schwarzplus', name: 'Schwarzes Buch', desc: 'Kugel auf Schwarz: +0,5 Mult, dauerhaft.', kind: 'deal', weight: 2, rarity: 'common' },
+  { id: 'vip', name: 'Ein Wort beim Saalchef', desc: 'Tischlimit +50 %, dauerhaft.', kind: 'deal', weight: 3, rarity: 'rare' },
+  { id: 'rotplus', name: 'Rote Tinte', desc: 'Kugel auf Rot: +0,5 Mult, dauerhaft.', kind: 'deal', weight: 2, rarity: 'rare' },
+  { id: 'schwarzplus', name: 'Schwarzes Buch', desc: 'Kugel auf Schwarz: +0,5 Mult, dauerhaft.', kind: 'deal', weight: 2, rarity: 'rare' },
   // Wheel building: a free upgrade you place yourself.
   { id: 'r_gold', name: 'Goldfach', desc: 'Gratis: ein Fach deiner Wahl wird golden (+1 Glücksmarke). Nochmal = stärker.', kind: 'rad', weight: 2, rarity: 'common' },
   { id: 'r_kristall', name: 'Kristallfach', desc: 'Gratis: ein Fach deiner Wahl zahlt ×2 Mult. Nochmal = stärker.', kind: 'rad', weight: 2, rarity: 'rare' },
-  { id: 'r_doppel', name: 'Doppelfach', desc: 'Gratis: ein Fach deiner Wahl verdoppelt die Summe. Nochmal = stärker.', kind: 'rad', weight: 2, rarity: 'rare' },
+  { id: 'r_doppel', name: 'Doppelfach', desc: 'Gratis: ein Fach deiner Wahl verdoppelt die Summe. Nochmal = stärker.', kind: 'rad', weight: 2, rarity: 'epic' },
   { id: 'r_stern', name: 'Sternfach', desc: 'Gratis: ein Fach deiner Wahl dreht bei einem Gewinn das Bonusrad.', kind: 'rad', weight: 2, rarity: 'rare' },
-  { id: 'r_kopie', name: 'Abklatsch', desc: 'Gratis: beide Nachbarn eines Fachs deiner Wahl werden zu seinen Kopien.', kind: 'rad', weight: 2, rarity: 'rare' },
+  { id: 'r_kopie', name: 'Abklatsch', desc: 'Gratis: beide Nachbarn eines Fachs deiner Wahl werden zu seinen Kopien.', kind: 'rad', weight: 2, rarity: 'epic' },
   // Balls.
-  { id: 'k_doppel', name: 'Zweite Kugel', desc: '2 Doppelkugel-Drehs: zwei Kugeln rollen, jede zahlt für sich.', kind: 'kugel', weight: 2, rarity: 'rare' },
+  { id: 'k_doppel', name: 'Zweite Kugel', desc: '2 Doppelkugel-Drehs: zwei Kugeln rollen, jede zahlt für sich.', kind: 'kugel', weight: 2, rarity: 'epic' },
   // Cheating tools.
   { id: 's_magnet', name: 'Taschenmagnet', desc: 'Magnet-Schummeln macht nur noch halb so viel Verdacht.', kind: 'schummel', weight: 2, rarity: 'rare' },
   { id: 's_finger', name: 'Flinke Finger', desc: 'Das Anstoßen der Kugel gelingt leichter (größere grüne Zone).', kind: 'schummel', weight: 2, rarity: 'common' },
-  { id: 's_ruhe', name: 'Unschuldsmiene', desc: 'Der Verdacht sinkt sofort auf 0 und danach doppelt so schnell.', kind: 'schummel', weight: 2, rarity: 'common' },
+  { id: 's_ruhe', name: 'Unschuldsmiene', desc: 'Der Verdacht sinkt sofort auf 0 und danach doppelt so schnell.', kind: 'schummel', weight: 2, rarity: 'rare' },
   // The Baron's deals: something now, a price later.
-  { id: 'b_umschlag', name: 'Ein Umschlag', desc: 'Sofort Bargeld in Höhe der halben Rate. Die nächste Rate steigt um das Anderthalbfache davon.', kind: 'baron', weight: 2, rarity: 'common' },
-  { id: 'b_stundung', name: 'Stundung', desc: 'Die nächste Rate sinkt um 30 %, die übernächste steigt um 15 %.', kind: 'baron', weight: 2, rarity: 'common' },
+  { id: 'b_umschlag', name: 'Ein Umschlag', desc: 'Sofort Bargeld in Höhe der halben Rate. Die nächste Rate steigt um das Anderthalbfache davon.', kind: 'baron', weight: 2, rarity: 'epic' },
+  { id: 'b_stundung', name: 'Stundung', desc: 'Die nächste Rate sinkt um 30 %, die übernächste steigt um 15 %.', kind: 'baron', weight: 2, rarity: 'rare' },
   { id: 'b_auftrag', name: 'Ein kleiner Auftrag', desc: '+6 Glücksmarken. Dafür Verdacht +40.', kind: 'baron', weight: 2, rarity: 'common' },
 ] as CardDef[]).map((c) => [c.id, c]));
 
@@ -60,6 +70,13 @@ export function cardDef(id: string): CardDef {
     return { id, name: d.name, desc: `Gratis auf deinen Tisch: ${d.desc.replace(' (aktuell +{n})', '')}`, kind: 'talisman', weight: 0, rarity: d.rarity };
   }
   return CARDS[id];
+}
+
+/** A card's tier: talisman cards take the talisman's, one higher when they make yours golden. */
+export function cardTier(def: CardDef, fuse = false): CardTier {
+  if (!fuse) return def.rarity;
+  const up: Record<CardTier, CardTier> = { common: 'rare', rare: 'epic', epic: 'legendary', legendary: 'legendary' };
+  return up[def.rarity];
 }
 
 /** Marks for turning all three cards down. */
