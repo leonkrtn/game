@@ -6,15 +6,15 @@ import { checkAchievements, loadProfile, lockedIds, recordRun, rewardName, saveP
 import { Run, RUSH_SECONDS } from './game/run';
 import { streakBonus, type Line, type SpinResult } from './game/scoring';
 import { canLockEscape, toggleFullscreen, watchFullscreen } from './fullscreen';
-import { BARON, SPECIAL_CHIPS } from './game/extras';
+import { BARON } from './game/extras';
 import { Input } from './input';
 import { $, fmt, fmtMult } from './ui/dom';
 import {
-  availableChips, bigWin, bump, closeModal, coveredCells, floater, hideOsd, modalOpen, navModal, openModal, renderFieldInfo,
+  availableChips, bigWin, bump, renderBoard, closeModal, coveredCells, floater, hideOsd, modalOpen, navModal, openModal, renderFieldInfo,
   renderItemTip, renderOsd, renderShopTip, renderScore, renderSlip, renderTableBar, setBanner, setHelp, setPrompt, toast, type ScoreState,
 } from './ui/hud';
 import {
-  automatView, collectionView, controlsView, bonusWheelView, draftView, gameOverView, kasseView, overviewView, pauseView, rideView, sharkView, startView, storyView, victoryView,
+  automatView, collectionView, controlsView, bonusWheelView, draftView, gameOverView, kasseView, overviewView, pauseView, sharkView, startView, storyView, victoryView,
   ownedView, wheelView,
 } from './ui/screens';
 import { renderGoal } from './ui/guide';
@@ -61,7 +61,6 @@ export class Game {
       mouse: (d) => {
         this.profile.mouse = Math.max(1, Math.min(10, this.profile.mouse + d));
         this.world.sensitivity = this.profile.mouse / 5;
-    sfx.setMusic(this.profile.music);
         saveProfile(this.profile);
         return this.profile.mouse;
       },
@@ -192,7 +191,7 @@ export class Game {
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('wheel', (e) => {
       if (this.mode !== 'table') return;
-      const list = availableChips(this.run.moneyBefore).filter((v) => v <= this.run.cash);
+      const list = availableChips(this.run.moneyBefore).filter((v) => v <= this.run.betLimit);
       const i = list.indexOf(this.chip);
       const j = Math.max(0, Math.min(list.length - 1, i + (e.deltaY > 0 ? 1 : -1)));
       if (list[j]) this.selectChip(list[j]);
@@ -221,7 +220,7 @@ export class Game {
       if (loading) loading.textContent = `BANDFEHLER: ${(e as Error).message ?? e}`;
       throw e;
     }
-    this.world.setQuality(this.profile.quality === 'auto' ? 'high' : this.profile.quality);
+    this.world.setQuality(this.profile.quality === 'auto' ? 'low' : this.profile.quality);
     if (loading) loading.textContent = 'LADE BAND … SPULE VOR';
     await this.world.warmup().catch(() => undefined);
     loading?.remove();
@@ -256,7 +255,7 @@ export class Game {
   private setGraphics(q: Profile['quality']): void {
     this.profile.quality = q;
     saveProfile(this.profile);
-    this.world.setQuality(q === 'auto' ? 'high' : q);
+    this.world.setQuality(q === 'auto' ? 'low' : q);
     this.fpsSlow = 0;
   }
 
@@ -313,7 +312,7 @@ export class Game {
     }), 'black');
   }
 
-  /** Pushes run state that the 3D scene shows: talismans, showcase, wheel, marquee, special chips. */
+  /** Pushes run state that the 3D scene shows: talismans, showcase, wheel, marquee, the Baron's blocked field. */
   private syncWorld(): void {
     const r = this.run;
     this.chanceCache = undefined;
@@ -323,7 +322,6 @@ export class Game {
     this.world.markCells = new Set(r.visions.map((i) => `n${r.wheel[i].number}`));
     this.world.setMarquee(r.history, r.debt, r.round, r.cycleRounds);
     this.world.blockedField = r.blocked;
-    this.world.setSpecials(r.placedSpecials, SPECIAL_CHIPS);
     this.world.setNews(r.news ? `${NEWS[r.news].headline} · ${NEWS[r.news].desc.toUpperCase()}` : '');
     this.world.setRival(r.duel);
     this.osdDirty = true;
@@ -644,7 +642,10 @@ export class Game {
   private closePanel(): void {
     closeModal();
     this.hideShop();
-    if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'smokes') this.enterRoom();
+    if (this.mode === 'kasse' || this.mode === 'vitrine' || this.mode === 'smokes') {
+      this.world.faceStation(this.mode);
+      this.enterRoom();
+    }
   }
 
   private pay(): void {
@@ -701,7 +702,7 @@ export class Game {
       sfx.pickup();
       toast('DU LÄSST DIE KARTEN LIEGEN. +◆2.');
       after();
-    }), 'clear');
+    }, (def) => this.world.figurineSnapshot(def)), 'clear');
   }
 
 
@@ -771,26 +772,8 @@ export class Game {
     this.renderTable();
   }
 
-  /** Special chip picked from the case, waiting to be laid on a field. */
-  private special?: number;
-
   private placeChip(): void {
     if (!this.hover) return;
-    if (this.special !== undefined) {
-      const uid = this.special;
-      if (!this.run.placeSpecial(uid, this.hover)) {
-        sfx.error();
-        toast('SPEZIALJETONS KOMMEN AUF EIN FELD, AUF DEM SCHON EIN EINSATZ LIEGT.');
-        return;
-      }
-      this.special = undefined;
-      sfx.chip();
-      const c = this.run.chips.find((x) => x.uid === uid)!;
-      toast(`${SPECIAL_CHIPS[c.def].name.toUpperCase()} AUF ${FIELD_BY_ID[this.hover].label.toUpperCase()}: ${SPECIAL_CHIPS[c.def].desc}`);
-      this.world.setSpecials(this.run.placedSpecials, SPECIAL_CHIPS);
-      this.renderTable();
-      return;
-    }
     if (!this.run.placeBet(this.hover, this.chip)) {
       sfx.error();
       if (this.chip <= this.run.cash) {
@@ -814,34 +797,10 @@ export class Game {
 
   private takeChip(): void {
     if (!this.hover) return;
-    if (this.special !== undefined) {
-      this.special = undefined;
-      this.renderTable();
-      return;
-    }
     if (!this.run.removeBet(this.hover)) return;
     this.world.pickChip(this.hover);
-    this.world.setSpecials(this.run.placedSpecials, SPECIAL_CHIPS);
     sfx.pickup();
     this.shownCash = this.run.cash;
-    this.renderTable();
-  }
-
-  /** Picks a special chip from the case, or takes it back off the felt. */
-  private pickSpecial(uid: number): void {
-    if (this.run.placed[uid]) {
-      this.run.removeSpecial(uid);
-      this.special = undefined;
-      sfx.pickup();
-      this.world.setSpecials(this.run.placedSpecials, SPECIAL_CHIPS);
-    } else if (this.special === uid) {
-      this.special = undefined;
-    } else {
-      this.special = uid;
-      sfx.select();
-      const c = this.run.chips.find((x) => x.uid === uid)!;
-      toast(`${SPECIAL_CHIPS[c.def].name.toUpperCase()}: KLICK AUF EIN FELD MIT EINSATZ.`);
-    }
     this.renderTable();
   }
 
@@ -941,7 +900,6 @@ export class Game {
     this.streakBefore = this.run.stats.winStreak;
     this.tutorialDone(2);
     const r = this.run.spin();
-    this.special = undefined;
     this.nudgeState = r.stake > 0 && !r.hop ? 'ready' : 'off';
     this.nudged = false;
     if (this.run.caught) {
@@ -971,7 +929,7 @@ export class Game {
     this.world.setGhost(undefined, undefined);
     $('fieldinfo').classList.add('hidden');
     $('itemtip').classList.add('hidden');
-    this.world.wheel.spin(r.hop ? r.hop.from : r.pocket.index, 6.5, r.hop?.to, r.second?.pocket.index);
+    this.world.wheel.spin(r.hop ? r.hop.from : r.pocket.index, r.hop?.to, r.second?.pocket.index);
     sfx.spin();
     // A lot riding on this one: heartbeat and slow motion at the end.
     const riding = r.stake + this.run.riskStake;
@@ -1183,58 +1141,17 @@ export class Game {
       else if (d.outcome === 'lost') toast(baron ? `DER BARON GEWINNT DIESEN DREH (${fmt(d.rivalNet ?? 0)} ZU ${fmt(d.playerNet ?? 0)}).` : `DUELL VERLOREN GEGEN ${d.name.toUpperCase()} (${fmt(d.playerNet ?? 0)} ZU ${fmt(d.rivalNet ?? 0)}): DIE RATE STEIGT UM 15 %.`, 'boss');
       else toast(`DUELL UNENTSCHIEDEN GEGEN ${d.name.toUpperCase()}.`);
     }
-    if (this.run.lastBroken.length) toast(`KLIRR – ${this.run.lastBroken.length > 1 ? `${this.run.lastBroken.length} GLASJETONS SIND` : 'DEIN GLASJETON IST'} ZERBROCHEN.`);
     if (this.run.suspicion >= 100) toast('DER SAALCHEF KOMMT AUF DICH ZU … BEIM NÄCHSTEN DREH IST ES SO WEIT.', 'boss');
     else if (this.run.suspicion >= 70) toast(`VERDACHT ${this.run.suspicion}/100 – DER SAALCHEF BEOBACHTET DICH.`, 'boss');
-    // The bonus wheel first, then the ladder, then back into the room.
-    if (this.run.bonusPending > 0 && this.run.phase !== 'shark') {
-      this.openBonus(() => this.afterSpinChoices());
+    // The bonus wheel first, then back into the room.
+    if (this.run.bonusPending > 0) {
+      this.openBonus(() => (this.run.phase === 'gameover' ? this.startCaught() : this.leaveAfterSpin()));
       return;
-    }
-    this.afterSpinChoices();
-  }
-
-  /** After a win with spins left: let it ride, or take the money. */
-  private afterSpinChoices(): void {
-    if (this.run.canRide) {
-      sfx.threat();
-      this.modalEscape = () => this.cashOut();
-      openModal(rideView(this.run, () => this.ride(), () => this.cashOut()), 'clear');
-      return;
-    }
-    if (this.run.rideStep > 0 && !this.run.riding && this.run.rideFrom === undefined && this.run.phase === 'betting' && this.run.lastResult && Run.totalPayout(this.run.lastResult) > this.run.lastResult.stake) {
-      toast('OBEN AUF DER LEITER: DAS GELD GEHÖRT DIR.', 'unlock');
-      this.run.cashOut();
     }
     this.leaveAfterSpin();
   }
 
   private modalEscape?: () => void;
-
-  private ride(): void {
-    this.modalEscape = undefined;
-    closeModal();
-    if (!this.run.letItRide()) {
-      this.leaveAfterSpin();
-      return;
-    }
-    sfx.chip();
-    this.world.syncChips(this.run.bets);
-    this.syncWorld();
-    toast(`LIEGEN LASSEN – STUFE ${this.run.rideStep}/3: +${String(this.run.rideStep * this.run.ridePerStep).replace('.', ',')} MULT. <kbd>LEER</kbd> DREHT.`, 'boss');
-    // Straight back to the wheel: no walking between the steps of the ladder.
-    this.mode = 'room';
-    this.enterTable();
-    this.betWait = 0.8;
-  }
-
-  private cashOut(): void {
-    this.modalEscape = undefined;
-    closeModal();
-    this.run.cashOut();
-    sfx.cash();
-    this.leaveAfterSpin();
-  }
 
   // ---- Bonus wheel ---------------------------------------------------------------------
 
@@ -1317,9 +1234,10 @@ export class Game {
       bribe: () => this.bribe(),
       risk: () => this.toggleRisk(),
       smoke: (i) => this.useSmoke(i),
-      special: (uid) => this.pickSpecial(uid),
       magnet: () => this.toggleMagnet(),
-    }, this.mode === 'spinning', this.special);
+    }, this.mode === 'spinning');
+    // While the ball runs, the wheel gets the whole screen.
+    $('tablebar').classList.toggle('hidden', this.mode === 'spinning');
     renderSlip(this.run, this.mode === 'table');
     this.osdDirty = true;
   }
@@ -1364,7 +1282,10 @@ export class Game {
       } else if (this.overview && (presses.includes('Escape') || presses.includes('Tab'))) this.toggleOverview();
       else if (this.paused && (presses.includes('Escape') || presses.includes('KeyP'))) this.closePause();
       else if (presses.includes('Escape')) {
-        if (this.mode === 'vitrine') {
+        // The Baron's cards and a free wheel upgrade wait for a choice: Esc does not throw them away.
+        if (this.run?.draft.length || this.run?.freeTool) {
+          // Nothing: pick a card, or „liegen lassen".
+        } else if (this.mode === 'vitrine') {
           closeModal();
           this.renderShopBar();
         } else if (this.mode === 'kasse' || this.mode === 'smokes') this.closePanel();
@@ -1388,6 +1309,7 @@ export class Game {
 
     $('crosshair').classList.toggle('hidden', !(this.mode === 'room' && !modalOpen()));
     renderGoal(this.run, this.mode === 'room' && !modalOpen());
+    renderBoard(this.run, (this.mode === 'room' || this.mode === 'table' || this.mode === 'spinning') && !!this.run && this.run.phase !== 'gameover', this.mode === 'spinning');
     if (Math.floor(this.tape * 2) !== this.hintTick) {
       this.hintTick = Math.floor(this.tape * 2);
       this.showHint();
@@ -1400,7 +1322,9 @@ export class Game {
         this.osdSecond = Math.floor(this.tape);
         this.osdDirty = true;
       }
-      const target = this.mode === 'spinning' && this.spinStage === 'rolling' ? this.run.cash : this.shownCash;
+      // The counter follows the real cash, except while a spin's win is being counted up.
+      if (!(this.mode === 'spinning' && this.spinStage === 'scoring')) this.shownCash = this.run.cash;
+      const target = this.shownCash;
       const d = target - this.shownCashValue;
       if (Math.abs(d) > 0.5) {
         const step = d * Math.min(1, dt * 6) + Math.sign(d) * dt * 20;

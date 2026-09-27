@@ -1,9 +1,9 @@
 import {
-  BALLS, CONSUMABLES, DEBTS, ITEMS, MAX_CONSUMABLES, NEWS, POCKET_ITEMS, RULES, SETS, SHARK_FACTOR,
+  BALLS, canFuse, CONSUMABLES, DEBTS, GOLD_DESC, ITEMS, MAX_CONSUMABLES, NEWS, POCKET_ITEMS, RULES, SETS, SHARK_FACTOR,
   STAGES, START_KITS, type PocketToolId,
 } from '../game/content';
 import { desktop, isFullscreen } from '../fullscreen';
-import { BARON, BONUS_SEGMENTS, CARD_KIND_NAME, CARDS, SPECIAL_CHIPS, type BonusSegment } from '../game/extras';
+import { BARON, BONUS_SEGMENTS, CARD_KIND_NAME, cardDef, type BonusSegment } from '../game/extras';
 import { ACHIEVEMENTS, nearestUnlocks, rewardName, type Profile } from '../game/meta';
 import type { Run } from '../game/run';
 import type { Pocket } from '../game/types';
@@ -35,7 +35,7 @@ export function kasseView(run: Run, hd: KasseHandlers): HTMLElement {
   let payNote = '';
   if (run.stakeTotal > 0) payNote = 'Erst deine Einsätze vom Tisch nehmen.';
   else if (!run.canPay()) payNote = `Dir fehlen noch ${fmt(short)}.`;
-  else if (run.phase === 'betting') payNote = `Früh zahlen bringt mehr Glücksmarken: +◆${run.payMarks} statt +◆${run.payMarks - run.roundsLeft}.`;
+  else if (run.phase === 'betting') payNote = `Früh zahlen bringt mehr Glücksmarken: +◆${run.payMarks} statt +◆${run.payMarks - run.roundsLeft}. ${run.roundsLeft === 1 ? 'Dein übriger Dreh verfällt' : `Deine übrigen ${run.roundsLeft} Drehs verfallen`}, die nächste Rate beginnt sofort.`;
 
   return h('div', { class: 'menu' },
     head('KASSE 01', `BARGELD <span class="money-c">${fmt(cash)}</span>`),
@@ -93,14 +93,13 @@ export function ownedView(run: Run, hd: Pick<VitrineHandlers, 'sell' | 'move' | 
 
 // ---- The card draft after every rate (the Baron's offer) --------------------------------------
 
-const CARD_GLYPH: Record<string, string> = { deal: '✦', jeton: '◎', rad: '✺', kugel: '●●', schummel: '☂', baron: '♛' };
+const CARD_GLYPH: Record<string, string> = { deal: '✦', talisman: '♜', rad: '✺', kugel: '●●', schummel: '☂', baron: '♛' };
 
 /** Three cards on the counter: pick one. They flip in one after another. */
-export function draftView(run: Run, line: string, choose: (i: number) => void, skip: () => void): HTMLElement {
+export function draftView(run: Run, line: string, choose: (i: number) => void, skip: () => void, figurineSnapshot: (def: string) => string): HTMLElement {
   const cards = h('div', { class: 'cards' });
   run.draft.forEach((id, i) => {
-    const c = CARDS[id];
-    const chip = id.startsWith('j_') ? SPECIAL_CHIPS[id.slice(2)] : undefined;
+    const c = cardDef(id);
     const card = h('button', { class: `card k-${c.kind} rar-${c.rarity}`, onclick: () => choose(i) });
     card.style.animationDelay = `${0.15 + i * 0.18}s`;
     card.addEventListener('mouseenter', () => {
@@ -108,15 +107,23 @@ export function draftView(run: Run, line: string, choose: (i: number) => void, s
       card.classList.add('sel');
     });
     const art = h('div', { class: 'art', text: CARD_GLYPH[c.kind] });
-    if (chip) {
+    // Talisman cards show the figurine itself, rendered once into a picture.
+    if (c.kind === 'talisman') {
       art.textContent = '';
-      art.append(h('span', { class: 'chipart', style: `--c:${chip.face};--r:${chip.rim}` }));
+      art.classList.add('fig');
+      const img = h('img', {}) as HTMLImageElement;
+      img.src = figurineSnapshot(id.slice(2));
+      art.append(img);
     }
+    // A talisman you already own turns golden instead.
+    const def = c.kind === 'talisman' ? id.slice(2) : '';
+    const fuse = def && run.items.some((t) => t.def === def && !t.gold) && canFuse(def);
+    const desc = fuse ? `Deiner wird golden: ${GOLD_DESC[def].replace(' (aktuell +{n})', '')}` : c.desc;
     card.append(
-      h('div', { class: 'kind', text: CARD_KIND_NAME[c.kind].toUpperCase() }),
+      h('div', { class: 'kind', text: fuse ? 'TALISMAN · GOLDEN' : CARD_KIND_NAME[c.kind].toUpperCase() }),
       art,
       h('div', { class: 'name', text: c.name }),
-      h('div', { class: 'desc', text: c.desc }),
+      h('div', { class: 'desc', text: desc }),
       h('div', { class: 'key', text: String(i + 1) }),
     );
     cards.append(card);
@@ -265,33 +272,10 @@ export function bonusWheelView(spins: number, spin: () => { index: number; text:
   return box;
 }
 
-// ---- Let it ride ---------------------------------------------------------------------------
-
-/** After a win: take the money, or let it ride one step up the ladder. */
-export function rideView(run: Run, ride: () => void, cash: () => void): HTMLElement {
-  const next = run.rideStep + 1;
-  const steps = h('div', { class: 'ladder' });
-  for (let i = 3; i >= 1; i--) {
-    steps.append(h('div', {
-      class: 'rung' + (i < next ? ' done' : i === next ? ' next' : ''),
-      html: `<b>STUFE ${i}</b><span>+${String(i * run.ridePerStep).replace('.', ',')} MULT${i === 3 ? ' · BONUSRAD' : ''}</span>`,
-    }));
-  }
-  return h('div', { class: 'menu ride', style: 'width:min(640px,100%)' },
-    head('LIEGEN LASSEN?', `<span class="money-c">${fmt(run.rideTotal)}</span>`),
-    h('p', { class: 'info', text: `Dein Gewinn bleibt auf ${Object.keys(run.rideFrom ?? {}).length > 1 ? 'seinen Feldern' : 'seinem Feld'} liegen – über das Tischlimit hinaus. Trifft es wieder, klettert die Leiter. Verliert es, ist alles weg.` }),
-    steps,
-    h('div', { class: 'rows' },
-      row(`<span class="luck-c">▲ LIEGEN LASSEN</span> – STUFE ${next}`, 'ENTER', ride),
-      row('AUSZAHLEN', 'ESC', cash),
-    ),
-  );
-}
-
 // ---- Wheel ------------------------------------------------------------------------------------
 
 export function wheelView(run: Run, close: () => void, upgrade?: { tool: PocketToolId; free?: boolean; apply: (pocket: number, num?: number) => void }): HTMLElement {
-  const box = h('div', { class: 'menu', style: 'width:min(640px,100%)' });
+  const box = h('div', { class: 'menu wheelmenu' });
   const def = upgrade ? POCKET_ITEMS[upgrade.tool] : undefined;
   const render = (chosen?: Pocket) => {
     box.replaceChildren(
@@ -299,8 +283,8 @@ export function wheelView(run: Run, close: () => void, upgrade?: { tool: PocketT
       h('p', {
         class: 'info',
         text: def
-          ? chosen ? `Welche Zahl soll das Fach „${chosen.number}" bekommen?` : `${def.desc} Klicke auf ein Fach.`
-          : 'Reihenfolge wie auf dem echten Rad. Die Prozente zeigen, wie oft die Kugel bei diesem Dreh in jedem Fach landet.',
+          ? chosen ? `Welche Zahl soll das Fach „${chosen.number}" bekommen?` : `${def.desc} Klicke auf ein Fach.${['pinsel', 'farbe', 'kopie'].includes(def.id) ? '' : ' Gleicher Effekt nochmal aufs selbe Fach: eine Stufe höher (bis III).'}`
+          : 'Reihenfolge wie auf dem echten Rad. Innen steht, wie oft die Kugel bei diesem Dreh in jedem Fach landet (in %).',
       }),
     );
     if (chosen && def?.id === 'pinsel') {
@@ -312,10 +296,10 @@ export function wheelView(run: Run, close: () => void, upgrade?: { tool: PocketT
     box.append(
       wheelRing(run, {
         pick: def ? (p) => (def.id === 'pinsel' ? render(p) : upgrade!.apply(p.index)) : undefined,
-        center: def ? 'FACH<br>WÄHLEN' : `${reds}× ROT<br>${blacks}× SCHWARZ<br>${37 - reds - blacks}× GRÜN`,
+        tool: def?.id,
+        center: def ? `<b>${def.name.toUpperCase()}</b><br>FACH WÄHLEN` : `${reds}× ROT<br>${blacks}× SCHWARZ<br>${37 - reds - blacks}× GRÜN`,
       }),
       modLegend(),
-      h('div', { class: 'info', text: 'Gleicher Effekt nochmal aufs selbe Fach: es steigt eine Stufe (bis III).' }),
       upgrade?.free ? h('div', {}) : h('div', { class: 'rows' }, row('ZURÜCK', 'ESC', close)),
     );
   };
@@ -342,8 +326,8 @@ function fullscreenRow(toggle: () => Promise<boolean>, onHover?: () => void): HT
   return b;
 }
 
-const GRAPHICS: Profile['quality'][] = ['auto', 'high', 'medium', 'low'];
-const GRAPHICS_NAME: Record<Profile['quality'], string> = { auto: 'AUTOMATISCH', high: 'HOCH', medium: 'MITTEL', low: 'NIEDRIG' };
+const GRAPHICS: Profile['quality'][] = ['low', 'medium', 'high'];
+const GRAPHICS_NAME: Record<Profile['quality'], string> = { auto: 'NIEDRIG (EMPFOHLEN)', high: 'HOCH', medium: 'MITTEL', low: 'NIEDRIG (EMPFOHLEN)' };
 
 export function startView(profile: Profile, locked: Set<string>, hd: StartHandlers, soundOn: boolean, quality: Profile['quality'] = 'auto'): HTMLElement {
   const kits = Object.values(START_KITS);
@@ -392,7 +376,7 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
   };
   const graphics = row('GRAFIK', gfxValue, () => stepGfx(1), {
     onStep: stepGfx,
-    onHover: () => (info.textContent = 'Ruckelt es? Stell die Grafik niedriger. Automatisch senkt sie von selbst, wenn das Bild zu langsam wird.'),
+    onHover: () => (info.textContent = 'Niedrig ist der eigentliche Look des Spiels: scharfe VHS-Optik, flüssigstes Bild. Mittel und Hoch fügen Glühen und weiche Schatten hinzu.'),
   });
   const sound = row('TON', soundOn ? 'AN' : 'AUS', () => {
     const on = hd.toggleSound();
@@ -543,13 +527,6 @@ export function overviewView(run: Run, close: () => void): HTMLElement {
   for (const t of run.items) {
     items.append(h('div', { class: 'ov' }, h('span', { class: 'n ' + rarityClass(t.def), text: itemName(t) }), h('span', { class: 'd', text: itemDesc(t) })));
   }
-  items.append(label(`JETON-ETUI ${run.chips.length}/6 · JEDER WIRKT EINMAL PRO RATE`));
-  if (!run.chips.length) items.append(h('div', { class: 'info', text: 'Leer. Spezialjetons gibt es auf den Karten des Barons und am Bonusrad.' }));
-  for (const c of run.chips) {
-    const d = SPECIAL_CHIPS[c.def];
-    items.append(h('div', { class: 'ov' + (run.usedChips.has(c.uid) ? ' used' : '') }, h('span', { class: 'n', text: `◎ ${d.name}${run.usedChips.has(c.uid) ? ' (VERBRAUCHT)' : ''}` }), h('span', { class: 'd', text: d.desc })));
-  }
-  if (run.chips.length >= 3) items.append(h('div', { class: 'info luck-c', text: 'Drei verschiedene Jetons in einem Dreh: VOLLES ETUI ×1,5 Mult.' }));
   items.append(label('SETS · DREI TALISMANE, DIE ZUSAMMENGEHÖREN'));
   for (const set of SETS) {
     const have = set.items.filter((d) => run.has(d));
@@ -566,7 +543,6 @@ export function overviewView(run: Run, close: () => void): HTMLElement {
     stat('ZINSEN AUF EINZAHLUNG', pct(run.interestRate) + ' PRO DREH'),
     stat('GLÜCKSMARKEN', `◆${run.marks}`),
     stat('VERDACHT', `${run.suspicion}/100${run.suspicion >= 70 ? ' – VORSICHT' : ''}`),
-    stat('LIEGENLASSEN-LEITER', `+${String(run.ridePerStep).replace('.', ',')} MULT PRO STUFE`),
     run.doubleCharges ? stat('DOPPELKUGEL', `${run.doubleCharges} DREH${run.doubleCharges > 1 ? 'S' : ''}`) : null,
     stat('KUGEL', `${BALLS[run.ball].name.toUpperCase()}`),
     h('div', { class: 'info', text: BALLS[run.ball].desc }),

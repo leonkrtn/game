@@ -16,6 +16,8 @@ export interface Profile {
   lastBall: string;
   /** Graphics setting: 'auto' lowers it by itself when the frame rate drops. */
   quality: 'auto' | 'high' | 'medium' | 'low';
+  /** Set once the default look moved to the low setting (the one that looks best). */
+  gfxLow?: boolean;
   /** Steps of the first-run tutorial already shown. */
   tutorial: number;
   /** Mouse sensitivity step 1..10 (5 = default). */
@@ -69,7 +71,6 @@ export const ACHIEVEMENTS: Achievement[] = [
   { id: 'risiko', name: 'Alles oder nichts', desc: 'Gewinne einen Hochrisiko-Dreh.', rewards: ['blei'], check: (r) => r.stats.riskWins >= 1 },
   { id: 'hai', name: 'Mit Haien schwimmen', desc: 'Nimm das Geld vom Kredithai und bezahle danach eine Rate.', rewards: ['gezinkt'], check: (r) => r.stats.sharkRepaid >= 1 },
   { id: 'bonusrad', name: 'Glücksrad', desc: 'Dreh das Bonusrad.', rewards: [], check: (r) => r.stats.bonusSpins >= 1, goal: (r) => [r.stats.bonusSpins, 1] },
-  { id: 'leiter', name: 'Ganz oben', desc: 'Lass einen Gewinn dreimal liegen und gewinne jedes Mal.', rewards: [], check: (r) => r.stats.bestRide >= 3, goal: (r) => [r.stats.bestRide, 3] },
   { id: 'doppeltreffer', name: 'Doppeltreffer', desc: 'Beide Kugeln treffen dasselbe Feld.', rewards: [], check: (r) => r.stats.doubleHits >= 1 },
   { id: 'anstoss', name: 'Flinke Finger', desc: 'Stoß die Kugel fünfmal an.', rewards: [], check: (r) => r.stats.nudges >= 5, goal: (r) => [r.stats.nudges, 5] },
   { id: 'baron', name: 'Auge in Auge', desc: 'Schlag den Baron bei einem Dreh.', rewards: [], check: (r) => r.stats.bossDuels >= 1 },
@@ -79,13 +80,21 @@ export const ACHIEVEMENTS: Achievement[] = [
 const KEY = 'rien-ne-va-plus/profile/v1';
 
 export function emptyProfile(): Profile {
-  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch', maxStage: 0, lastStage: 0, lastBall: 'stahl', quality: 'auto', tutorial: 0, mouse: 5, music: true };
+  return { runs: 0, wins: 0, bestRates: 0, bestWin: 0, totalWon: 0, done: [], lastKit: 'klassisch', maxStage: 0, lastStage: 0, lastBall: 'stahl', quality: 'low', gfxLow: true, tutorial: 0, mouse: 5, music: true };
 }
 
 export function loadProfile(): Profile {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...emptyProfile(), ...JSON.parse(raw) };
+    if (raw) {
+      const p: Profile = { ...emptyProfile(), gfxLow: false, ...JSON.parse(raw) };
+      // The low setting is the intended look: move everyone there once.
+      if (!p.gfxLow) {
+        p.quality = 'low';
+        p.gfxLow = true;
+      }
+      return p;
+    }
   } catch {
     // Storage can be unavailable (private mode, sandboxed previews); play without saving.
   }

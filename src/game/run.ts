@@ -4,15 +4,13 @@ import {
   type PocketToolId, type RuleId,
 } from './content';
 import { FIELD_BY_ID, fieldWins, isInsideCombo } from './fields';
-import {
-  BONUS_SEGMENTS, BOSS_DUEL_DISCOUNT, CARDS, CAUGHT_PENALTY, MAX_SPECIAL, SKIP_DRAFT_MARKS, SPECIAL_CHIPS, SUSPICION,
-} from './extras';
+import { BONUS_SEGMENTS, BOSS_DUEL_DISCOUNT, CARDS, CAUGHT_PENALTY, SKIP_DRAFT_MARKS, SUSPICION, TALISMAN_CARD_WEIGHT } from './extras';
 import { Rng } from './rng';
 import {
   activeItems, activeSets, hasSet, levelOf, luckOf, neighborIndices, noBoost, pocketWeights, scoreSpin, stakeOf, type Boost, type Perks,
-  type Line, type PlacedSpecial, type SpinResult,
+  type Line, type SpinResult,
 } from './scoring';
-import type { Bets, Color, ItemInstance, Pocket, PocketModId, ShopItem, SpecialChip } from './types';
+import type { Bets, Color, ItemInstance, Pocket, PocketModId, ShopItem } from './types';
 import { standardColor, WHEEL_ORDER } from './wheel';
 
 export const RUSH_SECONDS = 15;
@@ -86,7 +84,6 @@ export interface RunStats {
   sharkRepaid: number;
   smokes: number;
   bonusSpins: number;
-  bestRide: number;
   doubleHits: number;
   caught: number;
   nudges: number;
@@ -119,18 +116,8 @@ export class Run {
   nextDebtAdd = 0;
   /** Cards to pick from after paying a rate (the Baron's offer); empty when there is no draft. */
   draft: string[] = [];
-  /** The chip case: special chips owned, and where they lie this spin (uid -> field). */
-  chips: SpecialChip[] = [];
-  placed: Record<number, string> = {};
-  /** Special chips already played this rate: each one works once per rate and is back after paying. */
-  usedChips = new Set<number>();
   /** Free wheel upgrade from a card, waiting for a pocket. */
   freeTool?: PocketToolId;
-  /** Let-it-ride ladder: current step (0 = not riding) and extra mult per step. */
-  rideStep = 0;
-  ridePerStep = 0.25;
-  /** The bets on the felt are a ride of the last win. */
-  riding = false;
   /** Double-ball spins left, and whether the next spin has two balls. */
   doubleCharges = 0;
   private nextDoubleAt: number;
@@ -193,7 +180,7 @@ export class Run {
     lossStreak: 0, maxLossStreak: 0, winStreak: 0, maxWinStreak: 0, renumbers: 0, maxItems: 0, loansRepaid: 0, earlyPays: 0,
     focusWins: 0, nearMisses: 0, repeats: 0, minCash: Infinity, hangups: 0, sameBetStreak: 0, bestSameBetStreak: 0,
     golds: 0, maxSets: 0, bribesOk: 0, bribesCaught: 0, riskWins: 0, duelWins: 0, duelLosses: 0, sharkRepaid: 0, smokes: 0,
-    bonusSpins: 0, bestRide: 0, doubleHits: 0, caught: 0, nudges: 0, bossDuels: 0,
+    bonusSpins: 0, doubleHits: 0, caught: 0, nudges: 0, bossDuels: 0,
   };
   private locked: Set<string>;
   private uid = 1;
@@ -217,8 +204,6 @@ export class Run {
     this.perks.luck = (kit.luck ?? 0) - (this.stage >= 5 ? 1 : 0);
     if (this.stage >= 5) this.marks = 0;
     for (const id of kit.items ?? []) this.addItem(id);
-    // Every run starts with one chip in the case.
-    this.addChip(this.rng.pick(['glas', 'gold', 'feuer', 'blei']));
     this.nextRule = this.rollRule();
     this.startCycle();
   }
@@ -349,11 +334,6 @@ export class Run {
       - (this.rule === 'geiz' && !this.has('sonnenbrille') ? 1 : 0) - (this.stage >= 4 ? 1 : 0));
     this.roundsLeft = this.cycleRounds;
     this.bets = {};
-    this.placed = {};
-    this.usedChips.clear();
-    this.rideFrom = undefined;
-    this.rideStep = 0;
-    this.riding = false;
     this.rerollCost = 1;
     this.bribesThisCycle = 0;
     this.bribed = false;
@@ -410,8 +390,6 @@ export class Run {
     if (this.phase !== 'betting' || this.highRisk || value <= 0 || !FIELD_BY_ID[fieldId] || value > this.fieldRoom(fieldId)) return false;
     this.cash -= value;
     (this.bets[fieldId] ??= []).push(value);
-    this.riding = false;
-    this.rideFrom = undefined;
     return true;
   }
 
@@ -422,7 +400,6 @@ export class Run {
     if (!v) return 0;
     if (!stack.length) delete this.bets[fieldId];
     this.cash += v;
-    this.riding = false;
     return v;
   }
 
@@ -431,7 +408,6 @@ export class Run {
     this.setHighRisk(false);
     this.cash += this.stakeTotal;
     this.bets = {};
-    this.riding = false;
   }
 
   /** Places last round's bets again, as far as the cash allows. */
@@ -450,10 +426,7 @@ export class Run {
   }
 
   private get weightExtra() {
-    return {
-      ball: this.ball, kreide: this.boost.kreide, cheatMagnet: this.cheatMagnet,
-      magnetFields: this.placedSpecials.filter((c) => c.def === 'magnet').map((c) => c.fieldId),
-    };
+    return { ball: this.ball, kreide: this.boost.kreide, cheatMagnet: this.cheatMagnet };
   }
 
   /** The croupier's nudge: pockets that pay more than the stake weigh more. */
@@ -552,13 +525,8 @@ export class Run {
       moneyBefore: this.moneyBefore, perks: this.perks, cubeField: this.cubeField,
       lastNumber: this.history[0]?.n, lossStreak: this.stats.lossStreak, winStreak: this.stats.winStreak, sameBets: this.sameAsLast(),
       news: this.news, ball: this.ball, boost: this.boost, highRisk: this.highRisk,
-      specials: this.placedSpecials, rideStep: this.rideStep, rideBonus: this.riding ? this.rideStep * this.ridePerStep : 0, blocked: this.blocked,
+      blocked: this.blocked,
     };
-  }
-
-  /** Special chips on the felt this spin. */
-  get placedSpecials(): PlacedSpecial[] {
-    return this.chips.filter((c) => this.placed[c.uid] && this.bets[this.placed[c.uid]]).map((c) => ({ uid: c.uid, def: c.def, fieldId: this.placed[c.uid] }));
   }
 
   /** Whether the current bets are exactly last round's bets. */
@@ -581,10 +549,6 @@ export class Run {
       this.bribed = false;
       this.cheatMagnet = false;
     }
-    // Changing the ride's bets ends the ride.
-    if (!this.riding) this.rideStep = 0;
-    // Chips only count where there is a bet.
-    for (const [uid, fid] of Object.entries(this.placed)) if (!this.bets[fid]) delete this.placed[Number(uid)];
     if (this.bribed) {
       const price = this.bribePrice;
       if (this.cash < price) {
@@ -631,7 +595,6 @@ export class Run {
     this.bribed = false;
     this.cheatMagnet = false;
     this.bets = {};
-    this.placed = {};
     this.debtAdd += roundNice(this.debt * CAUGHT_PENALTY);
     this.suspicion = SUSPICION.afterCaught;
     this.stats.bribesCaught++;
@@ -691,11 +654,6 @@ export class Run {
     this.cash += total;
     this.marks += r.marks + (r.second?.marks ?? 0);
     for (const t of this.items) t.counter += r.growth[t.uid] ?? 0;
-    // Glass chips whose field lost are gone.
-    // With two balls a glass chip only breaks when its field lost on both.
-    const broken = new Set(r.broken.filter((u) => !r.second || r.second.broken.includes(u)));
-    if (broken.size) this.chips = this.chips.filter((c) => !broken.has(c.uid));
-    this.lastBroken = [...broken];
     this.lastInterest = Math.floor(this.deposit * this.interestRate);
     this.deposit += this.lastInterest;
     this.history.unshift({ n: r.pocket.number, c: r.pocket.color });
@@ -712,18 +670,7 @@ export class Run {
       this.riskStake = 0;
     }
     this.settleDuel(r, riskBack - riskIn + total - r.payout);
-    // Let-it-ride: what this spin won per field, for riding it on the next spin.
     const net = total - r.stake;
-    this.rideFrom = net > 0 ? this.winningStacks(r) : undefined;
-    if (this.rideStep > 0) {
-      this.stats.bestRide = Math.max(this.stats.bestRide, net > 0 ? this.rideStep : 0);
-      if (net <= 0 || this.rideStep >= 3) {
-        // The top of the ladder pays a bonus wheel spin, and you have to cash out.
-        if (net > 0 && this.rideStep >= 3) this.bonusPending++;
-        this.rideFrom = this.rideStep >= 3 ? undefined : this.rideFrom;
-        if (net <= 0) this.rideStep = 0;
-      }
-    }
     // Bonus wheel spins, multiplying this spin's net win.
     this.bonusPending += r.bonus + (r.second?.bonus ?? 0);
     if (this.bonusPending) this.bonusBase = Math.max(0, net);
@@ -731,11 +678,8 @@ export class Run {
     if (!this.cheatedThisSpin) this.suspicion = Math.max(0, this.suspicion - SUSPICION.decay * this.suspicionDecay);
     this.suspicion = Math.min(100, this.suspicion);
     this.cheatMagnet = false;
-    this.riding = false;
-    for (const uid of Object.keys(this.placed)) if (this.bets[this.placed[Number(uid)]]) this.usedChips.add(Number(uid));
     this.lastBets = this.bets;
     this.bets = {};
-    this.placed = {};
     this.boost = noBoost();
     this.bribed = false;
     this.roundsLeft--;
@@ -744,67 +688,28 @@ export class Run {
       this.rollVisions();
       this.rollDuel();
       this.rollDouble();
-      // Broke in the middle of a rate: the loan shark shows up once.
+    } else {
+      this.phase = 'due';
+    }
+    // The bonus wheel may still save the day: judge the money only once it has stopped.
+    if (!this.bonusPending) this.checkMoney();
+  }
+
+  /** Broke mid-rate, or short when the rate is due: the loan shark (once), or the end. */
+  private checkMoney(): void {
+    if (this.phase === 'betting') {
       if (this.cash < 1 && this.deposit < this.debt && !this.sharkUsed) {
         this.phase = 'shark';
         this.sharkDue = false;
       }
-    } else {
-      this.rideFrom = undefined;
-      this.rideStep = 0;
-      this.phase = 'due';
-      if (this.cash + this.deposit < this.debt) {
-        if (!this.sharkUsed) {
-          this.phase = 'shark';
-          this.sharkDue = true;
-        } else {
-          this.phase = 'gameover';
-        }
+    } else if (this.phase === 'due' && this.cash + this.deposit < this.debt) {
+      if (!this.sharkUsed) {
+        this.phase = 'shark';
+        this.sharkDue = true;
+      } else {
+        this.phase = 'gameover';
       }
     }
-  }
-
-  /** Glass chips that broke on the last spin. */
-  lastBroken: number[] = [];
-
-  // ---- Let it ride ---------------------------------------------------------------
-
-  /** Stacks the last win would put back on the felt (field -> amount), if riding is possible. */
-  rideFrom?: Record<string, number>;
-
-  private winningStacks(r: SpinResult): Record<string, number> {
-    const out: Record<string, number> = {};
-    for (const b of r.bets) if (b.won) out[b.fieldId] = (out[b.fieldId] ?? 0) + b.amount;
-    return out;
-  }
-
-  get canRide(): boolean {
-    return this.phase === 'betting' && !!this.rideFrom && this.stakeTotal === 0 && this.rideStep < 3
-      && Object.values(this.rideFrom).reduce((a, b) => a + b, 0) <= this.cash;
-  }
-
-  /** What riding would put on the felt. */
-  get rideTotal(): number {
-    return this.rideFrom ? Object.values(this.rideFrom).reduce((a, b) => a + b, 0) : 0;
-  }
-
-  /** Leaves the winnings on their fields for the next spin, past the table limit, one step up the ladder. */
-  letItRide(): boolean {
-    if (!this.canRide || !this.rideFrom) return false;
-    for (const [fid, v] of Object.entries(this.rideFrom)) {
-      this.cash -= v;
-      this.bets[fid] = [v];
-    }
-    this.rideStep++;
-    this.riding = true;
-    this.rideFrom = undefined;
-    return true;
-  }
-
-  /** Takes the money: the ladder starts from the bottom again. */
-  cashOut(): void {
-    this.rideFrom = undefined;
-    this.rideStep = 0;
   }
 
   // ---- Bonus wheel -------------------------------------------------------------------
@@ -827,10 +732,10 @@ export class Run {
       switch (seg.id) {
         case 'marken3': this.marks += 3; break;
         case 'marken5': this.marks += 5; break;
-        case 'jeton': {
-          const def = this.randomChipDef();
-          if (this.addChip(def)) text = `${SPECIAL_CHIPS[def].name} im Etui.`;
-          else { this.marks += 2; text = 'Das Etui ist voll: +◆2.'; }
+        case 'talisman': {
+          const def = this.randomTalisman();
+          text = def ? this.giveTalisman(def) : '+◆3.';
+          if (!def) this.marks += 3;
           break;
         }
         case 'doppel': this.doubleCharges += 1; break;
@@ -847,38 +752,11 @@ export class Run {
         }
       }
     }
-    if (this.bonusPending === 0) this.bonusBase = 0;
-    return { index, text };
-  }
-
-  // ---- The chip case ---------------------------------------------------------------
-
-  randomChipDef(): string {
-    const defs = Object.values(SPECIAL_CHIPS);
-    const w = defs.map((d) => (d.rarity === 'common' ? 4 : d.rarity === 'rare' ? 2 : 0.6));
-    return defs[this.rng.weighted(w)].id;
-  }
-
-  addChip(def: string): boolean {
-    if (this.chips.length >= MAX_SPECIAL || !SPECIAL_CHIPS[def]) return false;
-    this.chips.push({ uid: this.uid++, def });
-    return true;
-  }
-
-  /** Puts a special chip on a field that carries a bet, or takes it back when it lies there already. */
-  placeSpecial(uid: number, fieldId: string): boolean {
-    if (this.phase !== 'betting' || !this.chips.some((c) => c.uid === uid) || this.usedChips.has(uid)) return false;
-    if (this.placed[uid] === fieldId) {
-      delete this.placed[uid];
-      return true;
+    if (this.bonusPending === 0) {
+      this.bonusBase = 0;
+      this.checkMoney();
     }
-    if (!this.bets[fieldId]) return false;
-    this.placed[uid] = fieldId;
-    return true;
-  }
-
-  removeSpecial(uid: number): void {
-    delete this.placed[uid];
+    return { index, text };
   }
 
   // ---- Cheating ---------------------------------------------------------------------
@@ -1164,18 +1042,52 @@ export class Run {
   // ---- The card draft after every paid rate -------------------------------------------
 
   private rollDraft(): string[] {
-    const pool = Object.values(CARDS).filter((c) => !(c.id === 'platz' && this.perks.slots >= MAX_SLOTS)
-      && !(c.kind === 'jeton' && this.chips.length >= MAX_SPECIAL) && !(c.id === 'leiter' && this.ridePerStep >= 1));
-    const weight = (c: (typeof pool)[number]) => c.weight * (c.rarity === 'legendary' ? 0.5 : 1);
+    const pool: { id: string; w: number }[] = Object.values(CARDS)
+      // No card that would do nothing: a full table, a magnet already muffled, fingers already quick.
+      .filter((c) => !(c.id === 'platz' && this.perks.slots >= MAX_SLOTS) && !(c.id === 's_magnet' && this.magnetCost < 1)
+        && !(c.id === 's_finger' && this.nudgeZone >= 0.4))
+      .map((c) => ({ id: c.id, w: c.weight * (c.rarity === 'legendary' ? 0.5 : 1) }));
     const out: string[] = [];
-    // Always at least one chip or wheel card, so the build keeps growing.
-    const growth = pool.filter((c) => c.kind === 'jeton' || c.kind === 'rad');
-    if (growth.length) out.push(growth[this.rng.weighted(growth.map(weight))].id);
+    // One card is always a talisman (when one fits), one a wheel upgrade: the build keeps growing.
+    const t = this.randomTalisman();
+    if (t) out.push(`t_${t}`);
+    const rad = pool.filter((c) => c.id.startsWith('r_'));
+    out.push(rad[this.rng.weighted(rad.map((c) => c.w))].id);
     while (out.length < 3) {
       const rest = pool.filter((c) => !out.includes(c.id));
-      out.push(rest[this.rng.weighted(rest.map(weight))].id);
+      out.push(rest[this.rng.weighted(rest.map((c) => c.w))].id);
     }
     return this.rng.shuffle(out);
+  }
+
+  /** A talisman for a card or the bonus wheel: unlocked, and either new with room on the table or one to turn golden. */
+  randomTalisman(): string | undefined {
+    const owned = new Map(this.items.map((t) => [t.def, t]));
+    const full = this.items.length >= this.perks.slots;
+    const pool = Object.values(ITEMS).filter((d) => !this.locked.has(d.id)
+      && (owned.has(d.id) ? canFuse(d.id) && !owned.get(d.id)!.gold : !full));
+    if (!pool.length) return undefined;
+    return pool[this.rng.weighted(pool.map((d) => TALISMAN_CARD_WEIGHT[d.rarity] * (owned.has(d.id) ? 0.7 : 1)))].id;
+  }
+
+  /** Puts a talisman on the table for free (or turns the owned copy golden). */
+  giveTalisman(def: string): string {
+    const owned = this.items.find((t) => t.def === def && !t.gold);
+    const clock = this.clockBonus;
+    if (owned && canFuse(def)) {
+      owned.gold = true;
+      this.stats.golds++;
+    } else if (this.items.length < this.perks.slots) {
+      this.addItem(def);
+    } else {
+      this.marks += itemPrice(def);
+      return `Kein Platz auf dem Tisch: +◆${itemPrice(def)}.`;
+    }
+    const gained = this.clockBonus - clock;
+    this.roundsLeft += gained;
+    this.cycleRounds += gained;
+    if ((def === 'kristallkugel' || def === 'zauberwuerfel') && this.phase === 'betting') this.rollVisions();
+    return owned ? `${ITEMS[def].name} ist jetzt golden.` : `${ITEMS[def].name} steht jetzt auf deinem Tisch.`;
   }
 
   /** Turns the whole draft down for a couple of marks. */
@@ -1192,10 +1104,7 @@ export class Run {
     if (!id) return undefined;
     this.draft = [];
     const p = this.perks;
-    if (id.startsWith('j_')) {
-      const def = id.slice(2);
-      return this.addChip(def) ? `${SPECIAL_CHIPS[def].name} liegt jetzt in deinem Etui.` : 'Das Etui ist voll.';
-    }
+    if (id.startsWith('t_')) return this.giveTalisman(id.slice(2));
     if (id.startsWith('r_')) {
       this.freeTool = id.slice(2) as PocketToolId;
       return 'Wähl das Fach am Rad.';
@@ -1209,7 +1118,6 @@ export class Run {
       case 'runde': p.extraRounds++; this.roundsLeft++; this.cycleRounds++; return 'Ab sofort ein Dreh mehr vor jeder Rate.';
       case 'rotplus': p.redMult += 0.5; return 'Rot zahlt ab sofort +0,5 Mult.';
       case 'schwarzplus': p.blackMult += 0.5; return 'Schwarz zahlt ab sofort +0,5 Mult.';
-      case 'leiter': this.ridePerStep += 0.25; return `Jede Stufe der Leiter bringt jetzt +${String(this.ridePerStep).replace('.', ',')} Mult.`;
       case 'k_doppel': this.doubleCharges += 2; return 'Die nächsten 2 Drehs rollen zwei Kugeln.';
       case 's_magnet': this.magnetCost = 0.5; return 'Der Magnet macht nur noch halb so viel Verdacht.';
       case 's_finger': this.nudgeZone = Math.min(0.4, this.nudgeZone + 0.1); return 'Die grüne Zone beim Anstoßen ist größer.';

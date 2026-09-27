@@ -1,36 +1,11 @@
+import { ITEMS } from './content';
+
 // Content for the systems beyond plain roulette: the chip case, the card draft after each rate,
 // the bonus wheel, cheating and the Baron's story.
 
-// ---- Special chips: your chip case --------------------------------------------------------
-
-export interface SpecialChipDef {
-  id: string;
-  name: string;
-  desc: string;
-  /** Colours of the chip on the table and in the tray. */
-  face: string;
-  rim: string;
-  rarity: 'common' | 'rare' | 'legendary';
-}
-
-export const SPECIAL_CHIPS: Record<string, SpecialChipDef> = Object.fromEntries(([
-  { id: 'glas', name: 'Glasjeton', desc: 'Gewinnt das Feld: Summe ×1,5. Verliert es, zerbricht der Jeton.', face: '#bfe8ff', rim: '#ffffff', rarity: 'common' },
-  { id: 'gold', name: 'Goldjeton', desc: 'Gewinnt das Feld: +1 Glücksmarke.', face: '#e8b84a', rim: '#7a5010', rarity: 'common' },
-  { id: 'blei', name: 'Bleijeton', desc: 'Verliert das Feld: die Hälfte seines Einsatzes zurück.', face: '#6a6e76', rim: '#2a2c30', rarity: 'common' },
-  { id: 'feuer', name: 'Feuerjeton', desc: 'Gewinnt das Feld: +0,5 Mult.', face: '#ff6a1a', rim: '#ffd23a', rarity: 'common' },
-  { id: 'magnet', name: 'Magnetjeton', desc: 'Die Fächer dieses Felds ziehen die Kugel an (Plein ×2, sonst ×1,3).', face: '#c8202c', rim: '#dadde2', rarity: 'rare' },
-  { id: 'nachbar', name: 'Nachbarjeton', desc: 'Auf einem Plein: gewinnt auch, wenn die Kugel direkt daneben liegt (×12).', face: '#2a6ad8', rim: '#bfe0ff', rarity: 'rare' },
-  { id: 'zwilling', name: 'Zwillingsjeton', desc: 'Der Einsatz auf diesem Feld zählt doppelt – gratis.', face: '#b48cff', rim: '#ffffff', rarity: 'legendary' },
-] as SpecialChipDef[]).map((c) => [c.id, c]));
-
-/** Most special chips the case holds. */
-export const MAX_SPECIAL = 6;
-/** Three or more different special chips on the felt in one spin: the full case pays. */
-export const FULL_CASE_MULT = 1.5;
-
 // ---- The card draft after every paid rate (replaces the phone) -------------------------------
 
-export type CardKind = 'deal' | 'jeton' | 'rad' | 'kugel' | 'schummel' | 'baron';
+export type CardKind = 'deal' | 'talisman' | 'rad' | 'kugel' | 'schummel' | 'baron';
 
 export interface CardDef {
   id: string;
@@ -43,7 +18,7 @@ export interface CardDef {
 
 export const CARD_KIND_NAME: Record<CardKind, string> = {
   deal: 'Vorteil',
-  jeton: 'Jeton',
+  talisman: 'Talisman',
   rad: 'Rad-Umbau',
   kugel: 'Kugel',
   schummel: 'Schummelei',
@@ -60,15 +35,6 @@ export const CARDS: Record<string, CardDef> = Object.fromEntries(([
   { id: 'vip', name: 'Ein Wort beim Saalchef', desc: 'Tischlimit +50 %, dauerhaft.', kind: 'deal', weight: 3, rarity: 'common' },
   { id: 'rotplus', name: 'Rote Tinte', desc: 'Kugel auf Rot: +0,5 Mult, dauerhaft.', kind: 'deal', weight: 2, rarity: 'common' },
   { id: 'schwarzplus', name: 'Schwarzes Buch', desc: 'Kugel auf Schwarz: +0,5 Mult, dauerhaft.', kind: 'deal', weight: 2, rarity: 'common' },
-  { id: 'leiter', name: 'Kalte Nerven', desc: 'Liegenlassen-Leiter: jede Stufe +0,25 Mult mehr.', kind: 'deal', weight: 2, rarity: 'rare' },
-  // Chips for the case.
-  { id: 'j_glas', name: 'Glasjeton', desc: 'Neuer Spezialjeton: Summe ×1,5 auf seinem Feld, zerbricht bei Verlust.', kind: 'jeton', weight: 3, rarity: 'common' },
-  { id: 'j_gold', name: 'Goldjeton', desc: 'Neuer Spezialjeton: +1 Glücksmarke, wenn sein Feld gewinnt.', kind: 'jeton', weight: 3, rarity: 'common' },
-  { id: 'j_blei', name: 'Bleijeton', desc: 'Neuer Spezialjeton: halber Einsatz zurück, wenn sein Feld verliert.', kind: 'jeton', weight: 3, rarity: 'common' },
-  { id: 'j_feuer', name: 'Feuerjeton', desc: 'Neuer Spezialjeton: +0,5 Mult, wenn sein Feld gewinnt.', kind: 'jeton', weight: 3, rarity: 'common' },
-  { id: 'j_magnet', name: 'Magnetjeton', desc: 'Neuer Spezialjeton: zieht die Kugel in die Fächer seines Felds.', kind: 'jeton', weight: 2, rarity: 'rare' },
-  { id: 'j_nachbar', name: 'Nachbarjeton', desc: 'Neuer Spezialjeton: sein Plein zählt auch für die Nachbarfächer.', kind: 'jeton', weight: 2, rarity: 'rare' },
-  { id: 'j_zwilling', name: 'Zwillingsjeton', desc: 'Neuer Spezialjeton: der Einsatz auf seinem Feld zählt doppelt.', kind: 'jeton', weight: 1, rarity: 'legendary' },
   // Wheel building: a free upgrade you place yourself.
   { id: 'r_gold', name: 'Goldfach', desc: 'Gratis: ein Fach deiner Wahl wird golden (+1 Glücksmarke). Nochmal = stärker.', kind: 'rad', weight: 2, rarity: 'common' },
   { id: 'r_kristall', name: 'Kristallfach', desc: 'Gratis: ein Fach deiner Wahl zahlt ×2 Mult. Nochmal = stärker.', kind: 'rad', weight: 2, rarity: 'rare' },
@@ -87,6 +53,15 @@ export const CARDS: Record<string, CardDef> = Object.fromEntries(([
   { id: 'b_auftrag', name: 'Ein kleiner Auftrag', desc: '+6 Glücksmarken. Dafür Verdacht +40.', kind: 'baron', weight: 2, rarity: 'common' },
 ] as CardDef[]).map((c) => [c.id, c]));
 
+/** Any draft card by id: fixed cards, and `t_<item>` for a talisman card. */
+export function cardDef(id: string): CardDef {
+  if (id.startsWith('t_')) {
+    const d = ITEMS[id.slice(2)];
+    return { id, name: d.name, desc: `Gratis auf deinen Tisch: ${d.desc.replace(' (aktuell +{n})', '')}`, kind: 'talisman', weight: 0, rarity: d.rarity };
+  }
+  return CARDS[id];
+}
+
 /** Marks for turning all three cards down. */
 export const SKIP_DRAFT_MARKS = 2;
 
@@ -100,12 +75,18 @@ export interface BonusSegment {
   weight: number;
 }
 
+/**
+ * Talisman cards: the draft shows a concrete talisman (card id `t_<item>`), placed on your table
+ * for free. Their weight in the draft, by rarity.
+ */
+export const TALISMAN_CARD_WEIGHT = { common: 3, rare: 1.6, legendary: 0.5 };
+
 /** Segments in wheel order. `x…` multiply the net win of the spin that triggered the wheel. */
 export const BONUS_SEGMENTS: BonusSegment[] = [
   { id: 'x2', label: '×2', desc: 'Dein letzter Gewinn noch einmal.', color: '#c8202c', weight: 5 },
   { id: 'marken3', label: '◆3', desc: '+3 Glücksmarken.', color: '#6a2c9a', weight: 5 },
   { id: 'x3', label: '×3', desc: 'Dein letzter Gewinn zweimal obendrauf.', color: '#1f8a4a', weight: 3 },
-  { id: 'jeton', label: 'JETON', desc: 'Ein zufälliger Spezialjeton.', color: '#2a6ad8', weight: 4 },
+  { id: 'talisman', label: 'TALISMAN', desc: 'Ein zufälliger Talisman für deinen Tisch.', color: '#2a6ad8', weight: 3 },
   { id: 'niete', label: 'NIETE', desc: 'Nichts. Pech.', color: '#1b1b20', weight: 4 },
   { id: 'x5', label: '×5', desc: 'Dein letzter Gewinn viermal obendrauf.', color: '#e0a020', weight: 2 },
   { id: 'doppel', label: '2 KUGELN', desc: 'Der nächste Dreh mit zwei Kugeln.', color: '#b48cff', weight: 3 },

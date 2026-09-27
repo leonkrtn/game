@@ -1,9 +1,8 @@
-import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, NEWS, POCKET_ITEMS, POCKET_MOD_INFO, pocketModText, RARITY, RULES, SETS, STAGES, type PocketToolId } from '../game/content';
+import { CHIP_COLORS, chipLabel, CONSUMABLES, cursed, DENOMINATIONS, DEBTS, GOLD_DESC, ITEMS, MAX_POCKET_LVL, NEWS, POCKET_ITEMS, POCKET_MOD_INFO, pocketModText, RARITY, RULES, SETS, STAGES, type PocketToolId } from '../game/content';
 import { FIELD_BY_ID, fieldWins, KIND_NAME } from '../game/fields';
 import type { Run } from '../game/run';
-import { streakBonus, type Line } from '../game/scoring';
+import { neighborIndices, streakBonus, type Line } from '../game/scoring';
 import { buildFocus, fitReason } from './guide';
-import { SPECIAL_CHIPS } from '../game/extras';
 import type { ItemInstance, Pocket } from '../game/types';
 import { COLOR_NAME, POCKET_COUNT, standardColor } from '../game/wheel';
 import { $, fmt, fmtMult, h } from './dom';
@@ -43,7 +42,7 @@ export function fieldChance(run: Run, fieldId: string, ch = run.finalChances()):
   const f = FIELD_BY_ID[fieldId];
   let win = 0;
   run.wheel.forEach((p, i) => {
-    if (fieldWins(f, p) && !cursed(f.kind, run.activeRule)) win += ch[i];
+    if (fieldWins(f, p) && !cursed(f.kind, run.activeRule) && run.blocked !== fieldId) win += ch[i];
   });
   return win;
 }
@@ -84,7 +83,7 @@ export function renderOsd(run: Run, cash: number, tape: number, compact = false)
     h('div', { class: 'line', html: `KASSE <span class="debt">${fmt(run.deposit)}</span>  ${run.deposit >= run.debt ? '<span class="money">RATE GEDECKT</span>' : covered ? `NOCH ${fmt(run.debt - run.deposit)} – BARGELD REICHT` : `<span class="warn-soft">FEHLT ${fmt(run.debt - run.deposit - run.cash)}</span>`}` }),
     h('div', { class: 'line', html: `BARGELD <span class="money">${fmt(cash)}</span>${run.stakeTotal ? `  IM SPIEL ${fmt(run.stakeTotal)}` : ''}` }),
     h('div', { class: 'line', html: `<span class="marks">◆${run.marks}</span>  <span class="luck">GLÜCK ${run.luck}</span>  ZINS ${pct(run.interestRate)}  TALISMANE ${run.items.length}/${run.perks.slots}` }),
-    run.suspicion > 0 ? h('div', { class: 'line', html: `<span class="${run.suspicion >= 70 ? 'warn' : 'warn-soft'}">VERDACHT ${run.suspicion}/100</span>${run.chips.length ? `  JETONS ${run.chips.length}` : ''}` }) : null,
+    run.suspicion > 0 ? h('div', { class: 'line', html: `<span class="${run.suspicion >= 70 ? 'warn' : 'warn-soft'}">VERDACHT ${run.suspicion}/100</span>` }) : null,
     run.news && !compact ? h('div', { class: 'line news', html: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }) : null,
     compact ? null : h('div', {
       class: 'rule',
@@ -164,20 +163,10 @@ export interface TableHandlers {
   bribe(): void;
   risk(): void;
   smoke(i: number): void;
-  special(uid: number): void;
   magnet(): void;
 }
 
-/** A special chip's face, as in the tray. */
-export function specialFace(def: string): HTMLElement {
-  const d = SPECIAL_CHIPS[def];
-  const e = h('div', { class: 'chipface special', text: d.name.slice(0, 2).toUpperCase() });
-  e.style.setProperty('--c', d.face);
-  e.style.setProperty('--r', d.rim);
-  return e;
-}
-
-export function renderTableBar(run: Run, selected: number, hd: TableHandlers, busy: boolean, special?: number): void {
+export function renderTableBar(run: Run, selected: number, hd: TableHandlers, busy: boolean): void {
   const chips = $('chips');
   chips.replaceChildren();
   availableChips(run.cash + run.stakeTotal).forEach((v, i) => {
@@ -185,24 +174,6 @@ export function renderTableBar(run: Run, selected: number, hd: TableHandlers, bu
     b.append(chipFace(v), h('span', { class: 'k', text: `${i + 1}` }));
     chips.append(b);
   });
-  // The chip case: special chips, placed on a field that carries a bet.
-  if (run.chips.length) {
-    const tray = h('div', { class: 'specials' });
-    for (const c of run.chips) {
-      const on = run.placed[c.uid];
-      const b = h('button', {
-        class: 'chipbtn sp' + (special === c.uid ? ' sel' : '') + (on ? ' on' : ''),
-        onclick: () => hd.special(c.uid),
-        disabled: busy,
-        title: `${SPECIAL_CHIPS[c.def].name}: ${SPECIAL_CHIPS[c.def].desc}`,
-      });
-      const used = run.usedChips.has(c.uid);
-      if (used) b.disabled = true;
-      b.append(specialFace(c.def), h('span', { class: 'k', text: used ? 'NÄCHSTE RATE' : on ? FIELD_BY_ID[on].label.slice(0, 6) : SPECIAL_CHIPS[c.def].name.replace('jeton', '') }));
-      tray.append(b);
-    }
-    chips.append(tray);
-  }
   const hasLast = Object.keys(run.lastBets).length > 0;
   $('actions').replaceChildren(
     h('button', { onclick: hd.spin, disabled: busy || run.phase !== 'betting', html: '<kbd>LEER</kbd> DREHEN' }),
@@ -293,10 +264,7 @@ export function renderSlip(run: Run, show: boolean): void {
   const boosts = boostLabels(run);
   if (boosts.length) rows.push(h('div', { class: 'boost', text: 'AKTIV: ' + boosts.join(' · ') }));
   if (run.doubleNext) rows.push(h('div', { class: 'boost hot', text: `DOPPELKUGEL: ZWEI KUGELN ROLLEN, JEDE ZAHLT FÜR SICH.${run.doubleCharges > 1 ? ` (NOCH ${run.doubleCharges})` : ''}` }));
-  if (run.riding) rows.push(h('div', { class: 'boost hot', text: `LEITER STUFE ${run.rideStep}: +${String(run.rideStep * run.ridePerStep).replace('.', ',')} MULT` }));
   if (run.blocked) rows.push(h('div', { class: 'duel', text: `DER BARON SPERRT ${FIELD_BY_ID[run.blocked].label.toUpperCase()}: WETTEN DORT GEWINNEN NICHT.` }));
-  const placed = run.placedSpecials;
-  if (placed.length) rows.push(h('div', { class: 'boost', text: 'JETONS: ' + placed.map((c) => `${SPECIAL_CHIPS[c.def].name} auf ${FIELD_BY_ID[c.fieldId].label}`).join(' · ') + (new Set(placed.map((c) => c.def)).size >= 3 ? ' · VOLLES ETUI ×1,5' : '') }));
   rows.push(h('div', { class: 'susp' }, h('span', { text: `VERDACHT ${run.suspicion}/100` }), h('div', { class: 'meter' + (run.suspicion >= 70 ? ' danger' : '') }, h('i', { style: `width:${run.suspicion}%` }))));
   if (run.duel) {
     const f = FIELD_BY_ID[run.duel.fieldId];
@@ -487,6 +455,8 @@ export function modalOpen(): boolean {
 
 /** Arrow keys move the highlight through menu rows, Enter activates it. */
 export function navModal(key: string): boolean {
+  const ring = document.querySelector<HTMLElement & { nav?: (k: string) => boolean }>('#modal [data-nav]');
+  if (ring?.nav?.(key)) return true;
   const rows = [...document.querySelectorAll<HTMLButtonElement>('#modal button.card, #modal button.row:not(:disabled)')];
   if (!rows.length) return false;
   let i = rows.findIndex((r) => r.classList.contains('sel'));
@@ -525,33 +495,138 @@ export function row(label: string, value: string | HTMLElement = '', onclick?: (
   return b;
 }
 
-export function wheelRing(run: Run, opts: { pick?: (p: Pocket) => void; center?: string } = {}): HTMLElement {
-  const ring = h('div', { class: 'ring' });
-  const ch = run.chances();
-  const R = 185;
-  for (const p of run.wheel) {
-    const a = -Math.PI / 2 + (p.index / POCKET_COUNT) * Math.PI * 2;
-    const e = h('div', {
-      class: `p ${p.color}` + (opts.pick ? ' pickable' : '') + (run.visions.includes(p.index) ? ' vision' : ''),
-      text: String(p.number),
-      title: `${p.number} ${COLOR_NAME[p.color]}${p.mod ? ' · ' + POCKET_MOD_INFO[p.mod].name + ((p.lvl ?? 1) > 1 ? ` ${'I'.repeat(p.lvl ?? 1)}` : '') + ': ' + pocketModText(p.mod, p.lvl) : ''}`,
-      onclick: opts.pick ? () => opts.pick!(p) : undefined,
-    });
-    e.style.left = `${210 + Math.cos(a) * R}px`;
-    e.style.top = `${210 + Math.sin(a) * R}px`;
-    if (p.mod) {
-      e.style.borderColor = POCKET_MOD_INFO[p.mod].color;
-      e.style.borderWidth = `${2 + (p.lvl ?? 1)}px`;
+const POCKET_FILL: Record<string, string> = { red: '#c8202c', black: '#141414', green: '#11804a' };
+const MOD_TOOLS = new Set<string>(['gold', 'kristall', 'flamme', 'schwer', 'doppel', 'stern', 'eis']);
+
+/** What using `tool` on pocket `p` would do, or why it would be wasted. */
+function toolPreview(run: Run, tool: PocketToolId, p: Pocket): { text: string; ok: boolean; also: number[] } {
+  const up = (n: number, c: string) => `${n} ${COLOR_NAME[c as keyof typeof COLOR_NAME].toUpperCase()}`;
+  if (MOD_TOOLS.has(tool)) {
+    const mod = tool as keyof typeof POCKET_MOD_INFO;
+    const info = POCKET_MOD_INFO[mod];
+    if (p.mod === mod) {
+      const lvl = p.lvl ?? 1;
+      if (lvl >= MAX_POCKET_LVL) return { text: `SCHON ${info.name.toUpperCase()} III – MEHR GEHT NICHT`, ok: false, also: [] };
+      return { text: `${info.name.toUpperCase()} ${'I'.repeat(lvl + 1)}: ${pocketModText(mod, lvl + 1)}`, ok: true, also: [] };
     }
-    ring.append(e);
-    const c = h('span', { class: 'ch', text: pct(ch[p.index]) });
-    c.style.left = `${210 + Math.cos(a) * (R - 38)}px`;
-    c.style.top = `${210 + Math.sin(a) * (R - 38)}px`;
-    if (ch[p.index] > 1.2 / POCKET_COUNT) c.style.color = 'var(--debt)';
-    ring.append(c);
+    const was = p.mod ? ` (ERSETZT ${POCKET_MOD_INFO[p.mod].name.toUpperCase()})` : '';
+    return { text: `WIRD ${info.name.toUpperCase()}: ${pocketModText(mod, 1)}${was}`, ok: true, also: [] };
   }
-  ring.append(h('div', { class: 'center', html: opts.center ?? '' }));
-  return ring;
+  if (tool === 'farbe') {
+    if (p.color === 'green') return { text: 'GRÜN WIRD ROT', ok: true, also: [] };
+    return { text: `WIRD ${p.color === 'red' ? 'SCHWARZ' : 'ROT'}`, ok: true, also: [] };
+  }
+  if (tool === 'kopie') {
+    const nb = neighborIndices(p.index);
+    const same = nb.every((j) => run.wheel[j].number === p.number && run.wheel[j].color === p.color && run.wheel[j].mod === p.mod && run.wheel[j].lvl === p.lvl);
+    if (same) return { text: 'DIE NACHBARN SIND SCHON KOPIEN', ok: false, also: nb };
+    return { text: `${nb.map((j) => run.wheel[j].number).join(' UND ')} WERDEN ZU ${up(p.number, p.color)}${p.mod ? ' MIT ' + POCKET_MOD_INFO[p.mod].name.toUpperCase() : ''}`, ok: true, also: nb };
+  }
+  return { text: 'DANACH: NEUE ZAHL WÄHLEN', ok: true, also: [] };
+}
+
+/**
+ * The wheel as a big flat ring, seen from above in real order: numbers outside, each pocket's
+ * chance inside, effects as a coloured band around it. Hovering a pocket shows it in the middle;
+ * with `pick`, clicking it (or arrows + Enter) confirms with a flash.
+ */
+export function wheelRing(run: Run, opts: { pick?: (p: Pocket) => void; center?: string; tool?: PocketToolId } = {}): HTMLElement {
+  const box = h('div', { class: 'ring2' });
+  const ch = run.chances();
+  const N = POCKET_COUNT;
+  const C = 300;
+  const R = { modOut: 296, modIn: 272, numOut: 268, numIn: 196, chOut: 192, chIn: 150 };
+  const seg = (Math.PI * 2) / N;
+  const pt = (a: number, r: number) => `${(C + Math.cos(a) * r).toFixed(1)},${(C + Math.sin(a) * r).toFixed(1)}`;
+  const wedge = (a0: number, a1: number, r0: number, r1: number) =>
+    `M${pt(a0, r1)} A${r1},${r1} 0 0 1 ${pt(a1, r1)} L${pt(a1, r0)} A${r0},${r0} 0 0 0 ${pt(a0, r0)} Z`;
+  const maxCh = Math.max(...ch);
+  let svg = `<svg viewBox="0 0 600 600" class="wheelsvg"><circle cx="${C}" cy="${C}" r="${R.modOut + 3}" fill="#2a1508" stroke="#d6ad52" stroke-width="3"/>`;
+  for (const p of run.wheel) {
+    const mid = -Math.PI / 2 + p.index * seg;
+    const a0 = mid - seg / 2, a1 = mid + seg / 2;
+    const deg = (mid * 180) / Math.PI + 90;
+    const hot = ch[p.index] > 1.2 / N;
+    const vis = run.visions.includes(p.index);
+    svg += `<g class="pk${opts.pick ? ' pickable' : ''}" data-i="${p.index}">`;
+    svg += `<path class="mb" d="${wedge(a0, a1, R.modIn, R.modOut)}" fill="${p.mod ? POCKET_MOD_INFO[p.mod].color : vis ? '#b48cff' : '#3a2010'}"/>`;
+    if (p.mod && (p.lvl ?? 1) > 1) svg += `<text x="${pt(mid, 284).split(',')[0]}" y="${pt(mid, 284).split(',')[1]}" class="lv" transform="rotate(${deg} ${pt(mid, 284).replace(',', ' ')})">${'I'.repeat(p.lvl ?? 1)}</text>`;
+    svg += `<path class="nb" d="${wedge(a0, a1, R.numIn, R.numOut)}" fill="${POCKET_FILL[p.color]}"/>`;
+    const [nx, ny] = pt(mid, 234).split(',');
+    svg += `<text x="${nx}" y="${ny}" class="num" transform="rotate(${deg} ${nx} ${ny})">${p.number}</text>`;
+    svg += `<path class="cb" d="${wedge(a0, a1, R.chIn, R.chOut)}" fill="rgba(255,255,255,${(0.04 + 0.22 * (ch[p.index] / maxCh)).toFixed(3)})"/>`;
+    const [cx, cy] = pt(mid, 171).split(',');
+    svg += `<text x="${cx}" y="${cy}" class="chv${hot ? ' hot' : ''}" transform="rotate(${deg - 90} ${cx} ${cy})">${(ch[p.index] * 100).toFixed(1).replace('.', ',')}</text>`;
+    svg += `</g>`;
+  }
+  // Separators like brass frets.
+  for (let i = 0; i < N; i++) {
+    const a = -Math.PI / 2 + (i + 0.5) * seg;
+    svg += `<line x1="${pt(a, R.chIn).split(',')[0]}" y1="${pt(a, R.chIn).split(',')[1]}" x2="${pt(a, R.numOut).split(',')[0]}" y2="${pt(a, R.numOut).split(',')[1]}" stroke="#d6ad52" stroke-width="1.6" opacity=".8"/>`;
+  }
+  svg += `<circle cx="${C}" cy="${C}" r="${R.chIn - 2}" fill="#1a0d06" stroke="#d6ad52" stroke-width="2"/></svg>`;
+  const wrap = h('div', { class: 'wheelwrap2', html: svg });
+  const center = h('div', { class: 'center' });
+  const idle = () => center.replaceChildren(h('div', { class: 'c-idle', html: opts.center ?? '' }), h('div', { class: 'c-hint', text: opts.pick ? 'FACH ANKLICKEN · ◀ ▶ + ENTER' : 'MAUS AUF EIN FACH' }));
+  idle();
+  wrap.append(center);
+  box.append(wrap);
+  const groups = [...wrap.querySelectorAll<SVGGElement>('g.pk')];
+  let sel = -1;
+  let busy = false;
+  const show = (i: number) => {
+    sel = i;
+    groups.forEach((g) => g.classList.toggle('sel', +g.dataset.i! === i));
+    if (i < 0) {
+      groups.forEach((g) => g.classList.remove('also'));
+      idle();
+      return;
+    }
+    const p = run.wheel[i];
+    const pv = opts.tool ? toolPreview(run, opts.tool, p) : undefined;
+    groups.forEach((g) => g.classList.toggle('also', !!pv?.also.includes(+g.dataset.i!)));
+    center.replaceChildren(
+      h('div', { class: `c-num ${p.color}`, text: String(p.number) }),
+      h('div', { class: 'c-col', text: `${COLOR_NAME[p.color].toUpperCase()} · ${pct(ch[i])}` }),
+      h('div', { class: 'c-mod', text: p.mod ? `${POCKET_MOD_INFO[p.mod].name.toUpperCase()}${(p.lvl ?? 1) > 1 ? ' ' + 'I'.repeat(p.lvl ?? 1) : ''}: ${pocketModText(p.mod, p.lvl)}` : run.visions.includes(i) ? 'VISION DER KRISTALLKUGEL' : 'KEIN EFFEKT' }),
+      ...(pv ? [h('div', { class: 'c-pre' + (pv.ok ? '' : ' bad'), text: (pv.ok ? '→ ' : '✕ ') + pv.text })] : []),
+    );
+  };
+  const pick = (i: number) => {
+    if (!opts.pick || busy || i < 0) return;
+    const p = run.wheel[i];
+    if (opts.tool && !toolPreview(run, opts.tool, p).ok) {
+      groups[i].classList.remove('deny');
+      void groups[i].getBoundingClientRect();
+      groups[i].classList.add('deny');
+      return;
+    }
+    busy = true;
+    groups[i].classList.add('picked');
+    box.classList.add('picking');
+    setTimeout(() => opts.pick!(p), 480);
+  };
+  for (const g of groups) {
+    const i = +g.dataset.i!;
+    g.addEventListener('mouseenter', () => !busy && show(i));
+    g.addEventListener('click', () => pick(i));
+  }
+  wrap.addEventListener('mouseleave', () => !busy && show(-1));
+  // Keyboard: navModal hands arrows and Enter to the ring first.
+  (box as HTMLElement & { nav?: (k: string) => boolean }).nav = (k: string) => {
+    if (busy) return true;
+    if (k === 'ArrowLeft' || k === 'ArrowRight') {
+      show(sel < 0 ? 0 : (sel + (k === 'ArrowRight' ? 1 : N - 1)) % N);
+      return true;
+    }
+    if ((k === 'Enter' || k === 'Space') && sel >= 0 && opts.pick) {
+      pick(sel);
+      return true;
+    }
+    return false;
+  };
+  box.dataset.nav = '1';
+  return box;
 }
 
 export function modLegend(): HTMLElement {
@@ -565,4 +640,43 @@ export function numberPicker(onPick: (n: number) => void): HTMLElement {
   const g = h('div', { class: 'numpick' });
   for (let n = 0; n <= 36; n++) g.append(h('button', { class: standardColor(n), text: String(n), onclick: () => onPick(n) }));
   return g;
+}
+
+// ---- The board: chances of the next spin, always on screen ---------------------------------------
+
+let boardKey = '';
+
+/** The odds board: where the next ball ends, by colour, halves, dozens and the hottest numbers. */
+export function renderBoard(run: Run | undefined, show: boolean, frozen: boolean): void {
+  const box = $('board');
+  box.classList.toggle('hidden', !run || !show);
+  box.classList.toggle('low', frozen);
+  if (!run || !show) return;
+  // Sit right under the tape readout, however many lines it has.
+  const osd = document.querySelector('#osd .left');
+  if (!frozen && osd) box.style.top = `${Math.round(osd.getBoundingClientRect().bottom + 12)}px`;
+  if (frozen) box.style.top = '';
+  if (frozen) return;
+  const key = [
+    JSON.stringify(run.bets), run.wheel.map((p) => `${p.number}${p.color[0]}${p.mod ?? ''}${p.lvl ?? ''}`).join(), run.items.map((t) => t.def + (t.gold ? '*' : '')).join(),
+    run.activeRule, run.cheatMagnet, run.bribed, run.phase, run.round, run.visions.join(), run.highRisk, run.blocked, run.luck,
+  ].join('|');
+  if (key === boardKey) return;
+  boardKey = key;
+  const ch = run.finalChances();
+  const sum = (id: string) => run.wheel.reduce((a, p, i) => a + (fieldWins(FIELD_BY_ID[id], p) ? ch[i] : 0), 0);
+  const cell = (label: string, v: number, cls = '') => h('span', { class: 'b-c ' + cls }, h('i', { text: label }), h('b', { text: pct(v) }));
+  const byNumber = new Map<number, number>();
+  run.wheel.forEach((p, i) => byNumber.set(p.number, (byNumber.get(p.number) ?? 0) + ch[i]));
+  const hot = [...byNumber.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const colorOf = (n: number) => run.wheel.find((p) => p.number === n)?.color ?? 'green';
+  box.replaceChildren(
+    h('div', { class: 'b-head', text: 'TAFEL · CHANCEN NÄCHSTER DREH' }),
+    h('div', { class: 'b-row' }, cell('ROT', sum('red'), 'red'), cell('SCHWARZ', sum('black'), 'black'), cell('GRÜN', 1 - sum('red') - sum('black'), 'green')),
+    h('div', { class: 'b-row' }, cell('GERADE', sum('even')), cell('UNGERADE', sum('odd')), cell('1–18', sum('low')), cell('19–36', sum('high'))),
+    h('div', { class: 'b-row' }, cell('1–12', sum('doz0')), cell('13–24', sum('doz1')), cell('25–36', sum('doz2'))),
+    hot[0][1] > 1.1 / POCKET_COUNT
+      ? h('div', { class: 'b-row hot' }, h('i', { text: 'HEISS' }), ...hot.filter(([, v]) => v > 1.05 / POCKET_COUNT).map(([n, v]) => h('span', { class: 'b-n ' + colorOf(n) }, h('b', { text: String(n) }), h('i', { text: pct(v) }))))
+      : h('div', { class: 'b-row hot' }, h('i', { text: `JEDE ZAHL ${pct(hot[0][1])}` })),
+  );
 }

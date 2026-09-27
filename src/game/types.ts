@@ -49,9 +49,3 @@ export interface ShopItem {
   /** Buying it turns the owned copy golden. */
   fuse?: boolean;
 }
-
-/** A special chip from the chip case: placed on a field with a bet, it changes how that bet plays. */
-export interface SpecialChip {
-  uid: number;
-  def: string;
-}

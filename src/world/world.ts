@@ -116,11 +116,10 @@ export class World {
   hoverField?: string;
   hoverCells = new Set<string>();
   markCells = new Set<string>();
-  private tmpBall = new THREE.Vector3();
-  private tmpBall2 = new THREE.Vector3();
+  /** Wheel camera: how far it has closed in after the ball came to rest (0..1). */
+  private wheelZoom = 0;
   /** Field the Baron blocks: glows red. */
   blockedField?: string;
-  private specialMeshes: THREE.Mesh[] = [];
   pulseFields = new Set<string>();
 
   constructor(container: HTMLElement) {
@@ -517,7 +516,8 @@ export class World {
     this.velocity.lerp(target, 1 - Math.exp(-(move.lengthSq() > 0 ? 10 : 14) * dt));
     const p = this.player.group.position;
     p.addScaledVector(this.velocity, dt);
-    this.collide(p);
+    // People only block you while you walk into them; standing still, nobody shoves you around.
+    this.collide(p, this.velocity.lengthSq() > 0.01);
     const v = Math.hypot(this.velocity.x, this.velocity.z);
     this.player.heading = this.yaw + Math.PI;
     this.player.setSpeed(v);
@@ -559,8 +559,8 @@ export class World {
   }
 
   /** Keeps the player out of furniture and out of other people. */
-  private collide(p: THREE.Vector3): void {
-    for (const h of this.people) {
+  private collide(p: THREE.Vector3, withPeople: boolean): void {
+    for (const h of withPeople ? this.people : []) {
       if (h === this.player || !h.group.visible) continue;
       const q = h.group.position;
       const dx = p.x - q.x, dz = p.z - q.z;
@@ -585,7 +585,7 @@ export class World {
         const pb = b.group.position;
         const dx = pa.x - pb.x, dz = pa.z - pb.z;
         const d = Math.hypot(dx, dz);
-        const min = PERSON_R * 2;
+        const min = b === this.player ? PERSON_R + PLAYER_R + 0.02 : PERSON_R * 2;
         if (d >= min || d < 1e-6) continue;
         // Moving people give way to fixed ones and to the player; two walkers share the push.
         const share = fixed.has(b) || b === this.player ? 1 : 0.5;
@@ -634,14 +634,26 @@ export class World {
     const p = this.player.group.position;
     if (atTable) {
       p.set(TABLE_SPOT.x, 0, TABLE_SPOT.z);
-    } else {
-      // Step back from the table, looking at it.
-      this.yaw = 0;
-      this.pitch = -0.35;
+    } else if (Math.hypot(p.x - TABLE_SPOT.x, p.z - TABLE_SPOT.z) < 0.3) {
+      // Standing up from the table: still looking at it, not spun around.
+      this.lookAtPoint(TABLE.x + TABLE_LAYOUT.x, TABLE.z, -0.35);
     }
     // First person: you never see your own body.
     this.player.group.visible = false;
     this.velocity.set(0, 0, 0);
+  }
+
+  /** After using a station: you still look at it, and step back from it without a jolt. */
+  faceStation(where: 'kasse' | 'vitrine' | 'smokes'): void {
+    const t = where === 'kasse' ? KASSE : where === 'vitrine' ? VITRINE : SMOKES;
+    // Stand where the framed view was, so the camera does not have to travel.
+    const p = this.player.group.position;
+    p.set(this.camPos.x, 0, this.camPos.z);
+    resolve(p, PLAYER_R);
+    this.lookAtPoint(t.x, t.z, -0.12);
+    // Match the pitch to the framed view as well.
+    const dir = this.camLook.clone().sub(this.camPos);
+    this.pitch = THREE.MathUtils.clamp(Math.atan2(dir.y, Math.hypot(dir.x, dir.z)), -1.2, 1);
   }
 
   standAt(where: 'kasse' | 'vitrine' | 'smokes'): void {
@@ -764,32 +776,53 @@ export class World {
     }
   }
 
-  /** Special chips on top of their fields' stacks: thicker, glowing at the rim. */
-  setSpecials(list: { uid: number; def: string; fieldId: string }[], defs: Record<string, { face: string; rim: string }>): void {
-    for (const m of this.specialMeshes) this.layout.remove(m);
-    this.specialMeshes = [];
-    const byField = new Map<string, number>();
-    for (const c of list) {
-      const d = defs[c.def];
-      const k = byField.get(c.fieldId) ?? 0;
-      byField.set(c.fieldId, k + 1);
-      const side = new THREE.MeshPhysicalMaterial({ color: d.face, roughness: 0.25, clearcoat: 1, emissive: new THREE.Color(d.rim), emissiveIntensity: 0.35 });
-      const face = new THREE.MeshPhysicalMaterial({ color: d.face, roughness: 0.2, clearcoat: 1, metalness: c.def === 'gold' ? 0.9 : 0, transparent: c.def === 'glas', opacity: c.def === 'glas' ? 0.7 : 1 });
-      const m = new THREE.Mesh(this.chipGeo, [side, face, face]);
-      m.scale.set(1.12, 1.6, 1.12);
-      const n = this.stacks.get(c.fieldId)?.length ?? 0;
-      const base = this.stackPos(c.fieldId, n);
-      m.position.set(base.x + k * 0.004, base.y + CHIP_H * 0.3 + k * CHIP_H * 1.6, base.z);
-      m.castShadow = true;
-      this.layout.add(m);
-      this.specialMeshes.push(m);
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(CHIP_R * 1.15, 0.0016, 6, 32), new THREE.MeshBasicMaterial({ color: d.rim, toneMapped: false }));
-      ring.rotation.x = Math.PI / 2;
-      ring.position.copy(m.position);
-      ring.position.y += CHIP_H * 0.9;
-      this.layout.add(ring);
-      this.specialMeshes.push(ring);
-    }
+  private snapshots = new Map<string, string>();
+
+  /** A talisman rendered once into a small picture (for cards): transparent background, warm light. */
+  figurineSnapshot(def: string): string {
+    const hit = this.snapshots.get(def);
+    if (hit) return hit;
+    const size = 256;
+    const scene = new THREE.Scene();
+    scene.environment = this.scene.environment;
+    scene.environmentIntensity = 0.6;
+    const key = new THREE.DirectionalLight(0xffe2c0, 3);
+    key.position.set(0.6, 1.2, 1);
+    const rim = new THREE.DirectionalLight(0x8ab0ff, 1.5);
+    rim.position.set(-1, 0.6, -0.8);
+    scene.add(key, rim, new THREE.AmbientLight(0x604850, 0.8));
+    const fig = buildFigurine(def);
+    scene.add(fig.group);
+    fig.animate?.(0.5);
+    const box = new THREE.Box3().setFromObject(fig.group);
+    const c = box.getCenter(new THREE.Vector3());
+    const r = Math.max(0.02, box.getSize(new THREE.Vector3()).length() / 2);
+    const cam = new THREE.PerspectiveCamera(30, 1, 0.001, 10);
+    cam.position.set(c.x + r * 0.9, c.y + r * 1.2, c.z + r * 3.2);
+    cam.lookAt(c);
+    const rt = new THREE.WebGLRenderTarget(size, size, { samples: 4 });
+    rt.texture.colorSpace = THREE.SRGBColorSpace;
+    const prevTarget = this.renderer.getRenderTarget();
+    const prevClear = this.renderer.getClearAlpha();
+    this.renderer.setRenderTarget(rt);
+    this.renderer.setClearColor(0x000000, 0);
+    this.renderer.clear();
+    this.renderer.render(scene, cam);
+    const px = new Uint8Array(size * size * 4);
+    this.renderer.readRenderTargetPixels(rt, 0, 0, size, size, px);
+    this.renderer.setRenderTarget(prevTarget);
+    this.renderer.setClearAlpha(prevClear);
+    rt.dispose();
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = size;
+    const g = cv.getContext('2d')!;
+    const img = g.createImageData(size, size);
+    // Render targets are bottom-up.
+    for (let y = 0; y < size; y++) img.data.set(px.subarray((size - 1 - y) * size * 4, (size - y) * size * 4), y * size * 4);
+    g.putImageData(img, 0, 0);
+    const url = cv.toDataURL('image/png');
+    this.snapshots.set(def, url);
+    return url;
   }
 
   dimLosers(fieldIds: string[]): void {
@@ -846,8 +879,7 @@ export class World {
 
   /** The croupier sweeps the table: all chips slide off towards the wheel. */
   clearChips(): void {
-    const meshes = [...this.stacks.values()].flat().concat(this.specialMeshes);
-    this.specialMeshes = [];
+    const meshes = [...this.stacks.values()].flat();
     this.stacks.clear();
     for (const mesh of meshes) {
       const from = mesh.position.clone();
@@ -1397,18 +1429,14 @@ export class World {
         break;
       }
       case 'wheel': {
-        const p = this.wheel.progress;
-        const k = p * p;
-        pos.set(W.x + 0.15 - k * 0.1, TABLE.height + 0.9 - k * 0.38, W.z + 0.58 - k * 0.12);
-        // The eye follows the ball a little, and closes in on it as it settles.
-        const bp = this.wheel.ball.getWorldPosition(this.tmpBall);
-        const f = this.wheel.spinning ? 0.25 + 0.45 * k : 0.6;
-        look.set(W.x + (bp.x - W.x) * f, TABLE.height + 0.05, W.z + 0.04 + (bp.z - W.z - 0.04) * f);
-        if (p > 0.82 || !this.wheel.spinning) {
-          const z = this.wheel.spinning ? Math.min(1, (p - 0.82) / 0.18) * 0.45 : 0.45;
-          pos.lerp(this.tmpBall2.set(bp.x + (W.x - bp.x) * 0.2, bp.y + 0.32, bp.z + 0.28), z);
-        }
-        rate = p > 0.82 ? 5 : 3.5;
+        // A steady three-quarter view of the whole wheel: the eye never chases the ball. Once the
+        // ball rests, the view closes in a little, still on the whole wheel.
+        const settled = !this.wheel.spinning || this.wheel.progress >= 1;
+        this.wheelZoom += ((settled ? 1 : 0) - this.wheelZoom) * (1 - Math.exp(-dt * (settled ? 1.4 : 4)));
+        const z = smoothstep(this.wheelZoom);
+        pos.set(W.x + 0.12 - 0.04 * z, TABLE.height + 0.86 - 0.24 * z, W.z + 0.56 - 0.17 * z);
+        look.set(W.x, TABLE.height + 0.05 - 0.02 * z, W.z + 0.04);
+        rate = 2.2;
         break;
       }
       // Close-ups are still seen through your own eyes, just framed on what you use.
@@ -1442,14 +1470,15 @@ export class World {
         break;
       }
     }
+    if (this.cameraMode !== 'wheel') this.wheelZoom = 0;
     if (this.cameraMode === 'caught') this.caughtT += dt;
     else this.caughtT = 0;
     // First person: once the camera has arrived in your head, it follows the mouse exactly.
-    if (this.cameraMode === 'room' && this.camPos.distanceTo(pos) < 0.12) {
+    if (this.cameraMode === 'room' && this.camPos.distanceTo(pos) < 0.004 && this.camLook.distanceTo(look) < 0.004) {
       this.camPos.copy(pos);
       this.camLook.copy(look);
     } else {
-      const k = 1 - Math.exp(-(this.cameraMode === 'room' ? 7 : rate) * dt);
+      const k = 1 - Math.exp(-(this.cameraMode === 'room' ? 9 : rate) * dt);
       this.camPos.lerp(pos, k);
       this.camLook.lerp(look, k);
     }
@@ -1485,6 +1514,8 @@ export class World {
   }
 }
 
+
+const smoothstep = (u: number) => u * u * (3 - 2 * u);
 
 /** Small cream card with the price in lucky marks; greyed out when it can't be bought. */
 function priceTag(price: number, ok: boolean): THREE.CanvasTexture {

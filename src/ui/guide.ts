@@ -93,6 +93,6 @@ export function renderGoal(run: Run | undefined, show: boolean): void {
       h('span', { text: share >= 1 ? `RATE ${fmt(run.debt)} GEDECKT · DU HAST ${fmt(held)}` : `RATE ${fmt(run.debt)} · DU HAST ${fmt(held)}` }),
       h('span', { class: 'g-when', text: due ? 'JETZT FÄLLIG' : `IN ${left} ${left === 1 ? 'DREH' : 'DREHS'}` })),
     h('div', { class: 'g-next', text: '▶ ' + nextStep(run) }),
-    ...(streak > 0 ? [h('div', { class: 'g-streak', text: `SERIE ${streak} · NÄCHSTER GEWINN +${fmtMult(streakBonus(streak))} MULT${(streak + 1) % 3 === 0 ? ' UND +◆1' : ''}` })] : []),
+    ...(streak > 0 ? [h('div', { class: 'g-streak', text: `SERIE ${streak} · NÄCHSTER GEWINN +${fmtMult(streakBonus(streak))} MULT${(streak + 1) % 3 === 0 ? ' UND DAS BONUSRAD' : ''}` })] : []),
   );
 }

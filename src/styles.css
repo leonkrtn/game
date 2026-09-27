@@ -213,16 +213,6 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .caught .rows { width: min(520px, 100%); }
 
 /* ---- Wheel ring ---- */
-.ring { position: relative; width: 420px; height: 420px; margin: 0 auto; max-width: 100%; text-shadow: none; }
-.ring .p { position: absolute; width: 36px; height: 36px; margin: -18px 0 0 -18px; display: grid; place-items: center; font-size: 24px; border: 3px solid transparent; color: #fff; pointer-events: auto; }
-.ring .p.red { background: #c8202c; }
-.ring .p.black { background: #111; }
-.ring .p.green { background: #11804a; }
-.ring .p.vision { box-shadow: 0 0 0 3px #b48cff; }
-.ring .p.pickable { cursor: pointer; }
-.ring .p.pickable:hover { outline: 3px solid #fff; z-index: 2; }
-.ring .ch { position: absolute; transform: translate(-50%, -50%); font-size: 17px; white-space: nowrap; }
-.ring .center { position: absolute; inset: 140px; display: grid; place-items: center; text-align: center; font-size: 23px; line-height: 1.1; }
 .numpick { display: grid; grid-template-columns: repeat(13, 1fr); gap: 4px; }
 .numpick button { padding: 4px 0; text-align: center; color: #fff; font-size: 24px; text-shadow: none; }
 .numpick button.red { background: #c8202c; }
@@ -328,11 +318,6 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 #qte .zone { position: absolute; top: 0; bottom: 0; left: calc(var(--center) - var(--zone) / 2); width: var(--zone); background: #2fbf5a; }
 #qte .mark { position: absolute; top: -6px; bottom: -6px; left: var(--pos); width: 4px; background: #ffd24a; box-shadow: 0 0 8px #ffd24a; }
 
-/* Special chips in the tray. */
-.specials { display: flex; gap: 6px; margin-left: 18px; padding-left: 18px; border-left: 2px solid rgba(255, 255, 255, 0.25); }
-.chipface.special { border-style: double; border-width: 7px; font-size: 20px; box-shadow: 0 0 12px var(--r), 0 5px 0 -1px rgba(0, 0, 0, 0.55); }
-.chipbtn.sp .k { font-size: 16px; max-width: 70px; overflow: hidden; white-space: nowrap; }
-.chipbtn.sp.on .chipface { transform: translateY(-6px); box-shadow: 0 0 18px var(--r); }
 #slip .susp { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 #slip .susp .meter i { background: linear-gradient(90deg, #d8b04a, #ff3030); }
 #slip .susp .meter.danger { animation: blink 0.8s steps(2) infinite; }
@@ -347,6 +332,9 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .card:hover, .card.sel { transform: translateY(-10px) rotate(-1deg); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.8), 0 0 24px rgba(255, 210, 74, 0.5), inset 0 0 0 5px #0a0508, inset 0 0 0 6px rgba(201, 160, 74, 0.8); }
 .card .kind { font-size: 17px; letter-spacing: 0.1em; opacity: 0.8; }
 .card .art { width: 120px; height: 120px; display: grid; place-items: center; font-size: 64px; border-radius: 50%; background: radial-gradient(circle, rgba(255, 210, 120, 0.25), transparent 70%); color: #ffd24a; text-shadow: 0 0 18px rgba(255, 180, 60, 0.8); }
+.card .art.fig { width: 150px; height: 150px; }
+.card .art.fig img { width: 150px; height: 150px; filter: drop-shadow(0 6px 10px rgba(0,0,0,.7)); }
+.card.k-talisman .art { background: radial-gradient(circle, rgba(255, 220, 150, 0.3), transparent 70%); }
 .card .chipart { width: 88px; height: 88px; border-radius: 50%; background: radial-gradient(circle, var(--c) 0 46%, var(--r) 47% 52%, var(--c) 53% 100%); border: 8px dashed var(--r); box-shadow: 0 0 20px var(--r); }
 .card .name { font-size: 28px; line-height: 1; text-align: center; }
 .card .desc { font-size: 19px; text-transform: none; text-align: center; opacity: 0.92; line-height: 1.15; }
@@ -370,12 +358,6 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .bonus-status.niete { color: #ccc; }
 .bonuswheel .hint { font-size: 22px; opacity: 0.8; }
 
-/* Let-it-ride ladder. */
-.ladder { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 10px; }
-.ladder .rung { display: flex; justify-content: space-between; padding: 4px 12px; border: 2px solid rgba(255, 255, 255, 0.25); font-size: 24px; }
-.ladder .rung.done { background: rgba(47, 191, 90, 0.35); border-color: #2fbf5a; }
-.ladder .rung.next { border-color: #ffd24a; color: #ffd24a; animation: blink 1s steps(2) infinite; }
-
 /* Story captions. */
 .story { margin: auto; max-width: 900px; display: flex; flex-direction: column; gap: 18px; text-align: center; font-size: 30px; text-transform: uppercase; }
 .story p { margin: 0; opacity: 0; animation: typeIn 0.8s forwards; }
@@ -383,3 +365,52 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .story.inline { font-size: 22px; margin: 6px auto; gap: 6px; }
 .story.inline p { opacity: 1; animation: none; color: var(--luck); }
 @keyframes typeIn { from { opacity: 0; filter: blur(4px); transform: translateY(6px); } to { opacity: 1; filter: none; transform: none; } }
+
+/* The wheel view: a big flat ring. */
+.menu.wheelmenu { width: min(820px, 100%); }
+.ring2 { display: grid; place-items: center; text-shadow: none; }
+.wheelwrap2 { position: relative; width: min(600px, 58vh, 100%); aspect-ratio: 1; }
+.wheelsvg { width: 100%; height: 100%; display: block; }
+.wheelsvg text { font-family: 'VT323', monospace; fill: #fff; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+.wheelsvg .num { font-size: 30px; }
+.wheelsvg .chv { font-size: 15px; fill: #d8cfc0; }
+.wheelsvg .chv.hot { fill: var(--debt); }
+.wheelsvg .lv { font-size: 13px; fill: #1a0d06; }
+.wheelsvg g.pk path { transition: filter .12s, opacity .12s; }
+.wheelsvg g.pk.pickable { cursor: pointer; }
+.wheelsvg g.pk.sel path.nb, .wheelsvg g.pk.sel path.mb { filter: brightness(1.55); stroke: #fff; stroke-width: 3; }
+.wheelsvg g.pk.also path.nb { stroke: #ffd24a; stroke-width: 3; stroke-dasharray: 6 4; }
+.wheelsvg g.pk.picked path { animation: pk-pick .48s ease-out; }
+.wheelsvg g.pk.deny path.nb { animation: pk-deny .35s; }
+.ring2.picking .wheelsvg g.pk:not(.picked) { opacity: .45; transition: opacity .3s; }
+@keyframes pk-pick { 0%, 60% { filter: brightness(2.6); stroke: #fff; stroke-width: 6; } 100% { filter: brightness(1.2); } }
+@keyframes pk-deny { 0%, 100% { filter: none; } 30%, 70% { filter: brightness(.5) sepia(1) hue-rotate(-40deg) saturate(6); } }
+.wheelwrap2 .center { position: absolute; left: 50%; top: 50%; width: 42%; transform: translate(-50%, -50%); display: grid; gap: 4px; justify-items: center; text-align: center; font-size: 20px; line-height: 1.1; pointer-events: none; }
+.wheelwrap2 .c-idle { font-size: 22px; }
+.wheelwrap2 .c-hint { font-size: 15px; opacity: .6; }
+.wheelwrap2 .c-num { font-size: 64px; line-height: 1; min-width: 1.6em; padding: 2px 8px; border: 2px solid #d6ad52; }
+.wheelwrap2 .c-num.red { background: #c8202c; }
+.wheelwrap2 .c-num.black { background: #141414; }
+.wheelwrap2 .c-num.green { background: #11804a; }
+.wheelwrap2 .c-col { font-size: 18px; }
+.wheelwrap2 .c-mod { font-size: 16px; opacity: .85; }
+.wheelwrap2 .c-pre { font-size: 17px; color: var(--luck); }
+.wheelwrap2 .c-pre.bad { color: var(--rec); }
+
+/* The odds board, bottom left: an LED scoreboard like the ones over real roulette tables. */
+#board { position: absolute; left: 30px; top: 248px; background: rgba(8, 6, 4, 0.82); border: 2px solid #6a5220; padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 3px; font-size: 17px; line-height: 1.05; color: #ffd98a; text-shadow: 0 0 6px rgba(255, 180, 60, 0.45); box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6); pointer-events: none; }
+#board.low { top: auto; bottom: 26px; }
+#board .b-head { font-size: 14px; letter-spacing: 1px; color: #b89a5a; }
+#board .b-row { display: flex; gap: 12px; align-items: baseline; }
+#board .b-c { display: flex; gap: 5px; align-items: baseline; }
+#board .b-c i, #board .hot > i { font-style: normal; font-size: 14px; opacity: .75; }
+#board .b-c b { font-weight: normal; font-size: 19px; }
+#board .b-c.red b { color: #ff5a64; }
+#board .b-c.black b { color: #f2f2f2; }
+#board .b-c.green b { color: #4fe08a; }
+#board .b-n { display: flex; gap: 4px; align-items: baseline; }
+#board .b-n b { font-weight: normal; min-width: 26px; text-align: center; color: #fff; padding: 0 3px; }
+#board .b-n.red b { background: #c8202c; }
+#board .b-n.black b { background: #141414; outline: 1px solid #555; }
+#board .b-n.green b { background: #11804a; }
+#board .b-n i { font-style: normal; font-size: 15px; }

@@ -1,5 +1,4 @@
 import { cursed, ITEMS, POCKET_MOD_INFO, SETS, type RuleId, type SetDef } from './content';
-import { FULL_CASE_MULT } from './extras';
 import { FIELD_BY_ID, fieldWins, isInsideCombo, isOutside } from './fields';
 import type { Bets, ItemInstance, Pocket } from './types';
 import { POCKET_COUNT } from './wheel';
@@ -43,21 +42,11 @@ export interface SpinInput {
   boost?: Boost;
   /** Last spin of the rate played as all-or-nothing: ×2 Mult. */
   highRisk?: boolean;
-  /** Special chips on the felt this spin. */
-  specials?: PlacedSpecial[];
-  /** Let-it-ride ladder: extra mult for this step (0 when not riding). */
-  rideBonus?: number;
-  rideStep?: number;
   /** Outside field the Baron blocks this spin: bets on it cannot win. */
   blocked?: string;
 }
 
-/** A special chip lying on a field. */
-export interface PlacedSpecial {
-  uid: number;
-  def: string;
-  fieldId: string;
-}
+
 
 /** Effects of cigarette-machine items that last for one spin. */
 export interface Boost {
@@ -106,8 +95,6 @@ export interface SpinResult {
   nearMiss: number[];
   /** Set when luck made the ball hop into a better pocket. */
   hop?: { from: number; to: number };
-  /** Glass chips that broke (their field lost). */
-  broken: number[];
   /** Spins of the bonus wheel this result earns. */
   bonus: number;
   /** Second ball of a double-ball spin. */
@@ -153,17 +140,13 @@ export function luckOf(items: ItemInstance[], perks: Perks): number {
 }
 
 /** Relative chance of the ball landing in each pocket. */
-export function pocketWeights(wheel: Pocket[], bets: Bets, items: ItemInstance[], rule?: RuleId, extra: { ball?: string; kreide?: boolean; magnetFields?: string[]; cheatMagnet?: boolean } = {}): number[] {
+export function pocketWeights(wheel: Pocket[], bets: Bets, items: ItemInstance[], rule?: RuleId, extra: { ball?: string; kreide?: boolean; cheatMagnet?: boolean } = {}): number[] {
   const act = activeItems(items);
   const magnet = act.filter((x) => x.inst.def === 'magnet').reduce((a, x) => a * (levelOf(x) === 2 ? 3 : 2), 1);
   const skulls = act.filter((x) => x.inst.def === 'totenkopf').length;
   const pleins = new Set(Object.keys(bets).filter((id) => FIELD_BY_ID[id].kind === 'straight').map((id) => FIELD_BY_ID[id].value));
   return wheel.map((p) => {
     let w = p.mod === 'schwer' ? 1 + (p.lvl ?? 1) : 1;
-    for (const fid of extra.magnetFields ?? []) {
-      const f = FIELD_BY_ID[fid];
-      if (f && fieldWins(f, p)) w *= f.kind === 'straight' ? 2 : 1.3;
-    }
     if (p.number === 0) {
       if (rule === 'nullnebel') w *= 4;
       if (extra.ball === 'elfenbein') w *= 2;
@@ -190,7 +173,6 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   const active = activeItems(items);
 
   const lvl = pocket.lvl ?? 1;
-  const chipsOn = (fid: string) => (input.specials ?? []).filter((c) => c.fieldId === fid).map((c) => c.def);
 
   // 1. Which bets win.
   for (const [fid, stack] of Object.entries(bets)) {
@@ -201,21 +183,7 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     let payout = f.payout;
     if (cursed(f.kind, rule) || input.blocked === fid) won = false;
     if (f.kind === 'straight' && rule === 'halbzahl') payout = 18;
-    // The twin chip makes the stake on its field count double, for free.
-    const counted = chipsOn(fid).includes('zwilling') ? stake * 2 : stake;
-    results.push({ fieldId: fid, stake, won, payout: won ? payout : 0, amount: won ? counted * payout : 0 });
-  }
-  // The neighbour chip: its plein also wins when the ball lies right next to it.
-  {
-    const near = neighborIndices(pocketIndex).map((i) => wheel[i].number);
-    for (const r of results) {
-      const f = FIELD_BY_ID[r.fieldId];
-      if (!r.won && f.kind === 'straight' && near.includes(f.value) && chipsOn(r.fieldId).includes('nachbar') && input.blocked !== r.fieldId) {
-        r.won = true;
-        r.payout = 12;
-        r.amount = r.stake * (chipsOn(r.fieldId).includes('zwilling') ? 2 : 1) * 12;
-      }
-    }
+    results.push({ fieldId: fid, stake, won, payout: won ? payout : 0, amount: won ? stake * payout : 0 });
   }
   // The pager turns near misses on pleins into small wins.
   const pagers = activeItems(items).filter((x) => x.inst.def === 'pager');
@@ -235,14 +203,7 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   const anyWin = winners.length > 0;
   const stake = results.reduce((a, r) => a + r.stake, 0);
   for (const w of winners) {
-    const twin = chipsOn(w.fieldId).includes('zwilling');
-    lines.push({ kind: 'bet', text: `${FIELD_BY_ID[w.fieldId].label}: $${w.stake}${twin ? ' ×2 (Zwilling)' : ''} × ${w.payout}`, amount: w.amount, fieldId: w.fieldId });
-    // The glass chip doubles what its field brings.
-    if (chipsOn(w.fieldId).includes('glas')) {
-      const extra = Math.floor(w.amount / 2);
-      lines.push({ kind: 'bet', text: 'Glasjeton: ×1,5', amount: extra, fieldId: w.fieldId });
-      w.amount += extra;
-    }
+    lines.push({ kind: 'bet', text: `${FIELD_BY_ID[w.fieldId].label}: $${w.stake} × ${w.payout}`, amount: w.amount, fieldId: w.fieldId });
   }
   let sum = winners.reduce((a, r) => a + r.amount, 0);
   if (pocket.mod === 'doppel' && sum > 0) {
@@ -288,8 +249,6 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   if (input.boost?.korn) add('Doppelkorn', 2);
   // A hot hand: every profitable spin in a row adds to the next win.
   if (input.winStreak) add(`Serie ${input.winStreak}`, streakBonus(input.winStreak));
-  if (input.rideBonus) add(`Leiter Stufe ${input.rideStep ?? 1}`, input.rideBonus);
-  for (const w of winners) if (chipsOn(w.fieldId).includes('feuer')) add('Feuerjeton', 0.5);
 
   const kinds = new Set(winners.map((w) => FIELD_BY_ID[w.fieldId].kind));
   const straightWin = winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight' && w.payout >= 18);
@@ -360,14 +319,12 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   }
   if (sets.some((z) => z.id === 'nacht') && (pocket.color === 'black' || pocket.number === 0)) mul('Set Schwarze Nacht', 1.75);
   if (sets.some((z) => z.id === 'feuer') && pocket.color === 'red') mul('Set Feuerteufel', 2);
-  // The mixtape set also turns the pager's near misses into full plein wins for its ×3.
+  // The mixtape set counts the pager's near misses as plein wins too.
   if (sets.some((z) => z.id === 'achtziger') && winners.some((w) => FIELD_BY_ID[w.fieldId].kind === 'straight')) mul('Set Mixtape 87', 4);
   if (input.news === 'lotto' && straightWin) mul('Lottofieber', 1.5);
   if (input.news === 'komet' && pocket.number === 0) mul('Komet', 3);
   if (input.news === 'inflation') mul('Inflation', 1.2);
   if (input.highRisk) mul('Hochrisiko', 2);
-  // The full case: three or more different special chips on the felt.
-  if (new Set((input.specials ?? []).map((c) => c.def)).size >= 3) mul('Volles Etui', FULL_CASE_MULT);
   mult = Math.round(mult * 1000) / 1000;
 
   // 4. Money and marks.
@@ -389,23 +346,8 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
     if (input.boost?.kaugummi) refund('Kaugummi', 0.5);
     if (pocket.mod === 'eis') refund('Eisfach', Math.min(0.9, 0.3 * lvl));
   }
-  // Lead chips: a losing field gives half its stake back, whatever the others do.
-  for (const r of results) {
-    if (r.won || !chipsOn(r.fieldId).includes('blei')) continue;
-    const back = Math.floor(r.stake / 2);
-    if (back <= 0) continue;
-    payout += back;
-    lines.push({ kind: 'money', text: `Bleijeton: $${back} zurück`, amount: back, fieldId: r.fieldId });
-  }
-  const broken = (input.specials ?? []).filter((c) => c.def === 'glas' && !results.some((r) => r.fieldId === c.fieldId && r.won)).map((c) => c.uid);
+
   let marks = 0;
-  for (const w of winners) {
-    const n = chipsOn(w.fieldId).filter((d) => d === 'gold').length;
-    if (n) {
-      marks += n;
-      lines.push({ kind: 'marks', text: 'Goldjeton', amount: n, fieldId: w.fieldId });
-    }
-  }
   if (pocket.mod === 'gold') {
     const m = (glass ? 2 : 1) * lvl;
     marks += m;
@@ -425,5 +367,5 @@ export function scoreSpin(input: SpinInput, pocketIndex: number): SpinResult {
   if (stake > 0 && payout > stake && streak % 3 === 0) bonus++;
   if (pocket.mod === 'stern' && anyWin) bonus += lvl;
 
-  return { pocket, bets: results, lines, stake, sum, mult, payout, marks, anyWin, growth, nearMiss, broken, bonus };
+  return { pocket, bets: results, lines, stake, sum, mult, payout, marks, anyWin, growth, nearMiss, bonus };
 }
