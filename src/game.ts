@@ -52,12 +52,17 @@ export class Game {
   private pausedAt = 0;
 
   private openPause(): void {
+    this.modalEscape = undefined;
     this.paused = true;
     this.pausedAt = performance.now();
     this.releasePointer();
     openModal(pauseView(this.profile, !sfx.muted, {
       resume: () => this.closePause(),
-      controls: () => openModal(controlsView(() => this.openPause()), 'vcr', () => this.openPause()),
+      controls: () => {
+        // Esc in the controls goes back to the pause menu, not straight into the game.
+        this.modalEscape = () => this.openPause();
+        openModal(controlsView(() => this.openPause()), 'vcr', () => this.openPause());
+      },
       mouse: (d) => {
         this.profile.mouse = Math.max(1, Math.min(10, this.profile.mouse + d));
         this.world.sensitivity = this.profile.mouse / 5;
@@ -94,6 +99,7 @@ export class Game {
   }
 
   private closePause(): void {
+    this.modalEscape = undefined;
     this.paused = false;
     closeModal();
     if (this.mode === 'room') this.capturePointer();
@@ -142,6 +148,8 @@ export class Game {
   /** When the game itself last let go of the mouse, and when it last got it: losing it right after either is not an Esc. */
   private releasedAt = -1e9;
   private lockedAt = -1e9;
+  private unlockedSince = 0;
+  private lockRetry = 0;
 
   private releasePointer(): void {
     if (document.pointerLockElement) {
@@ -209,6 +217,13 @@ export class Game {
     }, { passive: true });
     window.addEventListener('keydown', () => sfx.unlock(), { once: true });
     // Esc also frees the mouse without a key event reaching the page: treat losing it like Esc.
+    // A capture refused right after Esc (browsers block it for about a second): try once more a little later.
+    document.addEventListener('pointerlockerror', () => {
+      clearTimeout(this.lockRetry);
+      this.lockRetry = window.setTimeout(() => {
+        if (this.mode === 'room' && !modalOpen()) this.capturePointer();
+      }, 1300);
+    });
     document.addEventListener('pointerlockchange', () => {
       // A capture that arrives after we already left the room (at the table, in a menu) is dropped again.
       if (document.pointerLockElement && !(this.mode === 'room' && !modalOpen())) {
@@ -221,11 +236,14 @@ export class Game {
         this.lockedAt = now;
         return;
       }
-      if (now - this.releasedAt > 600 && now - this.lockedAt > 300 && this.mode === 'room' && !modalOpen()) this.openPause();
+      // Only losing a capture we really had (and did not give up ourselves) counts as Esc.
+      const had = this.lockedAt > this.releasedAt;
+      this.releasedAt = now;
+      if (had && now - this.lockedAt > 300 && this.mode === 'room' && !modalOpen()) this.openPause();
     });
     // The browser dropped out of fullscreen by itself (Esc in Safari): pause like Esc would.
     watchFullscreen(() => {
-      if (this.mode === 'room' && !modalOpen()) this.openPause();
+      if ((this.mode === 'room' || this.mode === 'spinning') && !modalOpen()) this.openPause();
       toast('VOLLBILD VERLASSEN – <kbd>F</kbd> FÜR VOLLBILD, <kbd>Q</kbd> STATT ESC.');
     }, () => this.world.resize());
     void this.boot();
@@ -1298,6 +1316,8 @@ export class Game {
     this.last = now;
     this.watchPerformance(Math.min(raw, 1));
     const presses = this.input.takePresses();
+    // Paused: the ball, the scoring show and the room stand still.
+    const simDt = this.paused ? 0 : dt;
 
     if (presses.includes('KeyF')) void this.toggleFs();
     if (presses.includes('KeyM')) {
@@ -1351,6 +1371,9 @@ export class Game {
     $('crosshair').classList.toggle('hidden', !fp);
     // Walking around: no mouse pointer on screen, only the crosshair.
     document.body.classList.toggle('fp', fp);
+    // Without the captured mouse the view only turns until the pointer reaches the screen edge: say how to get it back.
+    if (!fp || document.pointerLockElement) this.unlockedSince = performance.now();
+    $('lockhint').classList.toggle('hidden', performance.now() - this.unlockedSince < 900);
     // Over a field or a showcase piece the pointer turns gold.
     document.body.classList.toggle('hot', !modalOpen() && ((this.mode === 'table' && !!this.hover) || (this.mode === 'vitrine' && this.world.hoverShowcase !== undefined)));
     renderGoal(this.run, this.mode === 'room' && !modalOpen());
@@ -1362,7 +1385,7 @@ export class Game {
 
     // Rolling cash counter and tape clock in the OSD.
     if (this.mode !== 'start' && this.mode !== 'over') {
-      this.tape += dt;
+      this.tape += simDt;
       if (Math.floor(this.tape) !== this.osdSecond) {
         this.osdSecond = Math.floor(this.tape);
         this.osdDirty = true;
@@ -1395,10 +1418,10 @@ export class Game {
       // The last turns in slow motion, speed-up ignored.
       if (k > 0.82) speed = 0.55;
     }
-    const ev = this.world.wheel.update(dt, speed);
+    const ev = this.world.wheel.update(simDt, speed);
     if (ev === 'landed') this.onFirstLanding();
     if (ev === 'done' && this.mode === 'spinning' && this.spinStage === 'rolling') this.onLanded();
-    this.world.update(dt);
+    this.world.update(simDt);
   }
 
   private frameRoom(dt: number, presses: string[]): void {
@@ -1528,6 +1551,10 @@ export class Game {
 
   private frameSpinning(dt: number, presses: string[]): void {
     this.world.movePlayer(dt, new THREE.Vector2(), false);
+    if (presses.includes('Escape') || presses.includes('KeyP')) {
+      this.openPause();
+      return;
+    }
     if (this.spinStage === 'rolling') {
       this.frameNudge(presses);
       sfx.roll(this.world.wheel.roll);

@@ -423,17 +423,72 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     g.position.set(TV.x, 0, TV.z);
     g.rotation.y = -Math.PI / 2 + 0.3;
     g.add(mesh(new THREE.BoxGeometry(0.6, 0.6, 0.45), darkWood, 0, 0.3, 0));
-    g.add(mesh(new RoundedBoxGeometry(0.62, 0.5, 0.48, 3, 0.05), std({ color: 0x2a2420, roughness: 0.5 }), 0, 0.86, 0));
+    // Cabinet in wood veneer, a dark plastic front with the tube on the left and the controls on the right.
+    const FW = 0.62, FH = 0.5, FZ = 0.245;
+    g.add(mesh(new RoundedBoxGeometry(FW, FH, 0.48, 3, 0.04), std({ color: 0x3a2414, roughness: 0.55 }), 0, 0.86, 0));
+    const plastic = std({ color: 0x1c1b1e, roughness: 0.45, metalness: 0.1 });
+    g.add(mesh(new RoundedBoxGeometry(FW - 0.03, FH - 0.03, 0.02, 2, 0.008), plastic, 0, 0.86, FZ));
+    const SW = 0.46, SH = 0.345, SX = -0.055, SY = 0.865;
+    // Chrome trim around the tube.
+    const chrome = std({ color: 0xb8b8c0, metalness: 1, roughness: 0.25 });
+    for (const [w, h, x, y] of [[SW + 0.02, 0.01, SX, SY + SH / 2 + 0.005], [SW + 0.02, 0.01, SX, SY - SH / 2 - 0.005], [0.01, SH, SX - SW / 2 - 0.005, SY], [0.01, SH, SX + SW / 2 + 0.005, SY]] as const) {
+      g.add(mesh(new THREE.BoxGeometry(w, h, 0.012), chrome, x, y, FZ + 0.012, false));
+    }
+    // Control strip: two knobs, buttons and a speaker grille.
+    const knobMat = std({ color: 0x2a2a2e, roughness: 0.35, metalness: 0.3 });
+    for (const y of [0.99, 0.91]) {
+      const k = mesh(new THREE.CylinderGeometry(0.022, 0.024, 0.025, 20), knobMat, 0.245, y, FZ + 0.02, false);
+      k.rotation.x = Math.PI / 2;
+      g.add(k);
+    }
+    for (let i = 0; i < 3; i++) g.add(mesh(new THREE.BoxGeometry(0.03, 0.012, 0.012), chrome, 0.245, 0.84 - i * 0.02, FZ + 0.014, false));
+    for (let i = 0; i < 6; i++) g.add(mesh(new THREE.BoxGeometry(0.07, 0.004, 0.004), std({ color: 0x0a0a0c, roughness: 0.9 }), 0.245, 0.77 - i * 0.012, FZ + 0.012, false));
+    g.add(mesh(new THREE.CircleGeometry(0.005, 10), new THREE.MeshBasicMaterial({ color: 0xff2020, toneMapped: false }), 0.225, 0.715, FZ + 0.013, false));
     const cv = document.createElement('canvas');
     cv.width = 160;
     cv.height = 120;
     const cg = cv.getContext('2d')!;
     const tvTex = new THREE.CanvasTexture(cv);
     tvTex.colorSpace = THREE.SRGBColorSpace;
-    const screen = mesh(new THREE.PlaneGeometry(0.44, 0.33), new THREE.MeshBasicMaterial({ map: tvTex, toneMapped: false }), -0.04, 0.88, 0.245, false);
+    // The tube fills the whole opening, slightly bulged like real glass.
+    const tubeGeo = new THREE.PlaneGeometry(SW, SH, 16, 12);
+    const pos = tubeGeo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i++) {
+      const u = pos.getX(i) / (SW / 2), v = pos.getY(i) / (SH / 2);
+      pos.setZ(i, (1 - Math.min(1, (u * u + v * v) / 2)) * 0.018);
+    }
+    tubeGeo.computeVertexNormals();
+    const screen = mesh(tubeGeo, new THREE.MeshBasicMaterial({ map: tvTex, toneMapped: false }), SX, SY, FZ + 0.006, false);
     g.add(screen);
-    const tvLight = new THREE.PointLight(0x6a8aff, 1.2, 2.6, 2);
-    tvLight.position.set(0, 0.9, 0.6);
+    // A faint reflection on the glass.
+    const glare = document.createElement('canvas');
+    glare.width = glare.height = 64;
+    const gg = glare.getContext('2d')!;
+    const gr = gg.createLinearGradient(0, 0, 64, 64);
+    gr.addColorStop(0, 'rgba(255,255,255,0.09)');
+    gr.addColorStop(0.45, 'rgba(255,255,255,0.01)');
+    gr.addColorStop(1, 'rgba(255,255,255,0)');
+    gg.fillStyle = gr;
+    gg.fillRect(0, 0, 64, 64);
+    g.add(mesh(tubeGeo, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(glare), transparent: true, depthWrite: false, toneMapped: false }), SX, SY, FZ + 0.009, false));
+    /** Rounded tube corners, a dark edge and scanlines over every frame. */
+    const tube = () => {
+      cg.fillStyle = 'rgba(0,0,0,0.18)';
+      for (let y = 0; y < 120; y += 2) cg.fillRect(0, y, 160, 1);
+      const vg = cg.createRadialGradient(80, 60, 40, 80, 60, 100);
+      vg.addColorStop(0, 'rgba(0,0,0,0)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.7)');
+      cg.fillStyle = vg;
+      cg.fillRect(0, 0, 160, 120);
+      cg.fillStyle = '#050505';
+      cg.beginPath();
+      cg.rect(0, 0, 160, 120);
+      cg.roundRect(2, 2, 156, 116, 14);
+      cg.fill('evenodd');
+    };
+    const tvLight = new THREE.PointLight(0x6a8aff, 1.2, 3.2, 2);
+    // In front of the set, so it lights the room rather than its own plastic front.
+    tvLight.position.set(0, 0.95, 1.1);
     g.add(tvLight);
     let tv = 0;
     let frame = 0;
@@ -494,6 +549,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
         const w = cg.measureText(text).width / 2;
         cg.fillText(text, 160 - (scroll % (w + 160)), 115);
       }
+      tube();
       tvTex.needsUpdate = true;
       tvLight.intensity = staticNow ? 1.6 : 1.1;
     });
