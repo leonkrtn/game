@@ -657,7 +657,8 @@ export class Game {
     this.rushLeft = undefined;
     this.shownCash = this.run.cash;
     toast(`RATE ${n} BEZAHLT. +◆${this.run.lastPayMarks} GLÜCKSMARKEN. DIE HERREN ZIEHEN AB – VORERST.`);
-    if (this.run.rule) setTimeout(() => toast(`NEUE HAUSREGEL: ${RULES[this.run.rule!].name.toUpperCase()} – ${RULES[this.run.rule!].desc}`), 800);
+    const rule = this.run.rule && RULES[this.run.rule];
+    if (rule) setTimeout(() => toast(`NEUE HAUSREGEL: ${rule.name.toUpperCase()} – ${rule.desc}`), 800);
     this.syncWorld();
     this.checkUnlocks();
     if (this.run.phase === 'victory') {
