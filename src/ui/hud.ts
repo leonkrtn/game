@@ -232,7 +232,10 @@ export function renderSlip(run: Run, show: boolean): void {
       h('span', { text: `TISCHLIMIT ${fmt(run.stakeTotal)} / ${fmt(run.tableMax)}` }),
       h('span', { text: `PLEIN MAX ${fmt(run.fieldMax('n1'))}` })),
     h('div', { class: 'meter' }, h('i', { style: `width:${Math.min(100, (run.stakeTotal / run.tableMax) * 100)}%` })),
-  ];
+    // At the table the tape readout is short: house rule and news live here.
+    run.rule ? h('div', { class: 'rule', html: `HAUSREGEL: ${run.activeRule ? '' : '<s>'}${RULES[run.rule].name}${run.activeRule ? '' : '</s> (SONNENBRILLE)'} – ${RULES[run.rule].desc}` }) : null,
+    run.news ? h('div', { class: 'news', text: `TV: ${NEWS[run.news].headline} – ${NEWS[run.news].desc}` }) : null,
+  ].filter((x): x is HTMLDivElement => !!x);
   const bets = Object.entries(run.bets);
   const ch = run.finalChances();
   if (!bets.length) {
@@ -316,7 +319,7 @@ export function renderFieldInfo(run: Run, fieldId: string | undefined, x: number
   box.classList.remove('hidden');
 }
 
-export function renderItemTip(run: Run, uid: number | undefined, x: number, y: number): void {
+export function renderItemTip(run: Run, uid: number | undefined, x: number, y: number, hint?: string): void {
   const box = $('itemtip');
   const t = uid === undefined ? undefined : run.items.find((i) => i.uid === uid);
   if (!t) {
@@ -328,6 +331,7 @@ export function renderItemTip(run: Run, uid: number | undefined, x: number, y: n
     h('div', { class: rarityClass(t.def), text: RARITY[d.rarity].name }),
     h('div', { class: 'name', text: d.name }),
     h('div', { class: 'desc', text: itemDesc(t) }),
+    ...(hint ? [h('div', { class: 'hint', text: hint })] : []),
   );
   box.style.left = `${x}px`;
   box.style.top = `${y - 10}px`;
@@ -647,15 +651,17 @@ export function numberPicker(onPick: (n: number) => void): HTMLElement {
 let boardKey = '';
 
 /** The odds board: where the next ball ends, by colour, halves, dozens and the hottest numbers. */
-export function renderBoard(run: Run | undefined, show: boolean, frozen: boolean): void {
+export function renderBoard(run: Run | undefined, show: boolean, frozen: boolean, side = false): void {
   const box = $('board');
   box.classList.toggle('hidden', !run || !show);
   box.classList.toggle('low', frozen);
+  // At the table it sits under the bet slip, off the felt.
+  box.classList.toggle('side', side && !frozen);
   if (!run || !show) return;
-  // Sit right under the tape readout, however many lines it has.
+  // In the room: right under the tape readout, however many lines it has.
   const osd = document.querySelector('#osd .left');
-  if (!frozen && osd) box.style.top = `${Math.round(osd.getBoundingClientRect().bottom + 12)}px`;
-  if (frozen) box.style.top = '';
+  if (!frozen && !side && osd) box.style.top = `${Math.round(osd.getBoundingClientRect().bottom + 12)}px`;
+  if (frozen || side) box.style.top = '';
   if (frozen) return;
   const key = [
     JSON.stringify(run.bets), run.wheel.map((p) => `${p.number}${p.color[0]}${p.mod ?? ''}${p.lvl ?? ''}`).join(), run.items.map((t) => t.def + (t.gold ? '*' : '')).join(),

@@ -47,6 +47,8 @@ interface PlacedItem {
   holder: THREE.Group;
   jump: number;
   gold: boolean;
+  /** Where it glides to (table-local), so reordering moves it instead of teleporting it. */
+  target: THREE.Vector3;
 }
 
 export type Quality = 'high' | 'medium' | 'low';
@@ -116,6 +118,12 @@ export class World {
   hoverField?: string;
   hoverCells = new Set<string>();
   markCells = new Set<string>();
+  /** Camera mode of the last frame, and what is left of a view change into first person. */
+  private lastCamMode = '';
+  /** Framing of the table view: shift towards the far side, and distance. */
+  tableCam = { z: -0.12, k: 1.08 };
+  private camOff = new THREE.Vector3();
+  private lookOff = new THREE.Vector3();
   /** Wheel camera: how far it has closed in after the ball came to rest (0..1). */
   private wheelZoom = 0;
   /** Field the Baron blocks: glows red. */
@@ -235,7 +243,7 @@ export class World {
         (l.shadow as { map: THREE.WebGLRenderTarget | null }).map = null;
       }
     });
-    this.renderer.setPixelRatio(q === 'high' ? Math.min(window.devicePixelRatio, 1.25) : q === 'medium' ? 1 : 0.75);
+    this.renderer.setPixelRatio(q === 'high' ? Math.min(window.devicePixelRatio, 1.25) : 1);
     this.resize();
   }
 
@@ -914,7 +922,7 @@ export class World {
         holder.scale.setScalar(1.3);
         holder.userData.itemUid = it.uid;
         this.tableGroup.add(holder);
-        p = { uid: it.uid, def: it.def, fig, holder, jump: 1, gold: !!it.gold };
+        p = { uid: it.uid, def: it.def, fig, holder, jump: 1, gold: !!it.gold, target: new THREE.Vector3() };
         const s = itemSlot(next.length, slots);
         this.burst(this.tableGroup.localToWorld(new THREE.Vector3(s.x, 0.05, s.z)), 0xffd76a, it.gold ? 50 : 20, 0.02);
       }
@@ -937,8 +945,13 @@ export class World {
       rim.position.set(s.x, 0.006, s.z);
       this.tableGroup.add(plate, rim);
       this.slotPlates.push(plate, rim);
-      if (next[i]) next[i].holder.position.set(s.x, 0.006, s.z);
+      if (next[i]) {
+        const fresh = next[i].holder.position.lengthSq() === 0;
+        next[i].target.set(s.x, 0.006, s.z);
+        if (fresh) next[i].holder.position.copy(next[i].target);
+      }
     }
+    this.slotCount = slots;
     next.forEach((p, i) => (p.holder.visible = i < slots));
   }
 
@@ -949,6 +962,66 @@ export class World {
     let o: THREE.Object3D | null = hit?.object ?? null;
     while (o && o.userData.itemUid === undefined) o = o.parent;
     return o?.userData.itemUid;
+  }
+
+  private slotCount = 0;
+  /** Talisman being dragged by the mouse, and the slot it would drop into. */
+  private dragging?: { uid: number; slot: number };
+  private readonly dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  /** Picks a talisman up. Returns false when there is none under the pointer. */
+  startDrag(clientX: number, clientY: number): boolean {
+    const uid = this.pickItem(clientX, clientY);
+    if (uid === undefined) return false;
+    const i = this.placedItems.findIndex((p) => p.uid === uid);
+    this.dragging = { uid, slot: i };
+    return true;
+  }
+
+  get isDragging(): boolean {
+    return !!this.dragging;
+  }
+
+  /** Moves the held talisman with the pointer; the others make room. Returns the target slot. */
+  moveDrag(clientX: number, clientY: number): number | undefined {
+    const d = this.dragging;
+    if (!d) return undefined;
+    const ndc = new THREE.Vector2((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
+    this.raycaster.setFromCamera(ndc, this.camera);
+    this.dragPlane.constant = -(this.tableGroup.position.y + 0.006);
+    const hit = this.raycaster.ray.intersectPlane(this.dragPlane, this.tmpWorld);
+    const held = this.placedItems.find((p) => p.uid === d.uid);
+    if (!hit || !held) return d.slot;
+    const local = this.tableGroup.worldToLocal(hit.clone());
+    const n = Math.min(this.slotCount, this.placedItems.length);
+    const first = itemSlot(0, this.slotCount), last = itemSlot(n - 1, this.slotCount);
+    const row = first.z;
+    local.x = THREE.MathUtils.clamp(local.x, first.x - 0.05, last.x + 0.05);
+    local.z = THREE.MathUtils.clamp(local.z, row - 0.08, row + 0.12);
+    held.target.set(local.x, 0.05, local.z);
+    // Nearest slot along the row.
+    let best = 0;
+    for (let i = 1; i < n; i++) if (Math.abs(itemSlot(i, this.slotCount).x - local.x) < Math.abs(itemSlot(best, this.slotCount).x - local.x)) best = i;
+    d.slot = best;
+    const others = this.placedItems.filter((p) => p.uid !== d.uid);
+    others.forEach((p, i) => {
+      const s = itemSlot(i >= best ? i + 1 : i, this.slotCount);
+      p.target.set(s.x, 0.006, s.z);
+    });
+    return best;
+  }
+
+  /** Lets go: returns the dragged uid and its new slot. The caller reorders and calls setItems. */
+  endDrag(): { uid: number; slot: number } | undefined {
+    const d = this.dragging;
+    this.dragging = undefined;
+    if (!d) return undefined;
+    // Back into the row until the new order arrives.
+    this.placedItems.forEach((p, i) => {
+      const s = itemSlot(i, this.slotCount);
+      p.target.set(s.x, 0.006, s.z);
+    });
+    return d;
   }
 
   triggerItem(uid: number): THREE.Vector3 | undefined {
@@ -1306,6 +1379,7 @@ export class World {
     for (const p of this.placedItems) {
       p.fig.animate?.(this.time);
       if (p.gold && Math.random() < dt * 3) this.burst(p.holder.localToWorld(new THREE.Vector3((Math.random() - 0.5) * 0.05, p.fig.height * Math.random() + 0.01, (Math.random() - 0.5) * 0.05)), 0xffe08a, 1, 0.004);
+      p.holder.position.lerp(p.target, 1 - Math.exp(-dt * (this.dragging?.uid === p.uid ? 30 : 12)));
       p.jump = Math.max(0, p.jump - dt * 2.5);
       const k = Math.sin(p.jump * Math.PI);
       p.fig.group.position.y = k * 0.04;
@@ -1423,8 +1497,9 @@ export class World {
         const slip = window.innerWidth > 1050 ? 1 : 0;
         const zoom = back * (1 + 0.36 * slip);
         const dx = 0.42 * slip;
-        pos.set(L.x + dx, L.y + 1.15 * zoom, L.z + 0.74 * zoom);
-        look.set(L.x + dx, L.y, L.z + 0.02 * zoom);
+        const tz = this.tableCam.z, tk = this.tableCam.k;
+        pos.set(L.x + dx, L.y + 1.15 * zoom * tk, L.z + 0.74 * zoom * tk + tz);
+        look.set(L.x + dx, L.y, L.z + 0.02 * zoom + tz);
         rate = 5;
         break;
       }
@@ -1473,15 +1548,24 @@ export class World {
     if (this.cameraMode !== 'wheel') this.wheelZoom = 0;
     if (this.cameraMode === 'caught') this.caughtT += dt;
     else this.caughtT = 0;
-    // First person: once the camera has arrived in your head, it follows the mouse exactly.
-    if (this.cameraMode === 'room' && this.camPos.distanceTo(pos) < 0.004 && this.camLook.distanceTo(look) < 0.004) {
-      this.camPos.copy(pos);
-      this.camLook.copy(look);
+    // First person: the view follows the mouse exactly, every frame. Coming from another view,
+    // only the leftover offset of that view fades out, so turning never lags behind.
+    if (this.cameraMode === 'room') {
+      if (this.lastCamMode !== 'room') {
+        this.camOff.subVectors(this.camPos, pos);
+        this.lookOff.subVectors(this.camLook, look);
+      }
+      const fade = Math.exp(-9 * dt);
+      this.camOff.multiplyScalar(fade);
+      this.lookOff.multiplyScalar(fade);
+      this.camPos.copy(pos).add(this.camOff);
+      this.camLook.copy(look).add(this.lookOff);
     } else {
-      const k = 1 - Math.exp(-(this.cameraMode === 'room' ? 9 : rate) * dt);
+      const k = 1 - Math.exp(-rate * dt);
       this.camPos.lerp(pos, k);
       this.camLook.lerp(look, k);
     }
+    this.lastCamMode = this.cameraMode;
     this.camera.position.copy(this.camPos);
     this.camera.lookAt(this.camLook);
     // Handheld feel: the camera breathes a little; when caught, the world tips over.

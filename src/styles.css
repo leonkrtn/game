@@ -39,7 +39,7 @@ html, body {
 
 #app, #app canvas { position: fixed; inset: 0; display: block; }
 #ui { position: fixed; inset: 0; pointer-events: none; text-shadow: var(--glow); }
-#ui button, #ui .clickable, #modal, #tablebar { pointer-events: auto; }
+#ui button, #ui .clickable, #modal { pointer-events: auto; }
 .hidden { display: none !important; }
 
 /* Scanlines over the whole interface, so the OSD sits "in" the picture. */
@@ -60,12 +60,12 @@ button {
   background: none;
   border: 0;
   padding: 0;
-  cursor: pointer;
+  cursor: var(--cur-hand);
   text-transform: uppercase;
   text-align: left;
   text-shadow: inherit;
 }
-button:disabled { opacity: 0.4; cursor: default; }
+button:disabled { opacity: 0.4; cursor: var(--cur); }
 button:focus-visible { outline: none; }
 
 kbd { font: inherit; padding: 0 5px; background: var(--osd); color: #000; text-shadow: none; }
@@ -113,7 +113,7 @@ kbd { font: inherit; padding: 0 5px; background: var(--osd); color: #000; text-s
 #helpbar { position: absolute; bottom: 22px; left: 30px; right: 30px; font-size: 22px; display: flex; gap: 24px; flex-wrap: wrap; opacity: 0.9; text-transform: uppercase; }
 
 /* ---- Chip tray and table actions ---- */
-#tablebar { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 10px; max-width: calc(100% - 48px); }
+#tablebar { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; width: min(1000px, calc(100% - 48px)); pointer-events: none; }
 #chips { display: flex; gap: 14px; align-items: flex-end; }
 .chipbtn { display: flex; flex-direction: column; align-items: center; gap: 2px; transition: transform 0.1s; text-align: center; }
 .chipbtn:hover:not(:disabled) { transform: translateY(-3px); }
@@ -135,7 +135,7 @@ kbd { font: inherit; padding: 0 5px; background: var(--osd); color: #000; text-s
   box-shadow: 0 5px 0 -1px rgba(0, 0, 0, 0.55);
   transition: transform 0.1s, box-shadow 0.1s;
 }
-#actions { display: flex; gap: 24px; flex-wrap: wrap; justify-content: center; font-size: 24px; }
+#actions { display: flex; gap: 6px 22px; flex-wrap: wrap; justify-content: center; font-size: 23px; }
 #actions button { padding: 0 4px; }
 #actions button:hover:not(:disabled) { background: var(--osd); color: #000; text-shadow: none; }
 
@@ -225,7 +225,7 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #000; color: #fff; font: 400 34px var(--osd-font); letter-spacing: 0.08em; z-index: 60; text-shadow: var(--glow); }
 
 /* ---- Bet slip beside the table ---- */
-#slip { position: absolute; right: 24px; top: 150px; bottom: 190px; width: min(410px, 32vw); overflow: auto; background: rgba(11, 20, 110, 0.82); padding: 6px 12px 10px; box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; gap: 3px; font-size: 21px; line-height: 1.05; }
+#slip { position: absolute; right: 24px; top: 150px; bottom: 212px; width: min(410px, 32vw); overflow: auto; background: rgba(11, 20, 110, 0.82); padding: 6px 12px 10px; box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; gap: 3px; font-size: 21px; line-height: 1.05; }
 #slip .title { font-size: 25px; border-bottom: 2px solid var(--vcr-line); margin-bottom: 2px; }
 #slip .title.small { font-size: 22px; margin-top: 8px; }
 #slip .bet { display: grid; grid-template-columns: 1fr auto auto auto; gap: 8px; text-transform: uppercase; }
@@ -329,7 +329,7 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .draft .sub { font-size: 22px; opacity: 0.8; }
 
 /* Bonus wheel. */
-.bonuswheel { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: auto; text-transform: uppercase; cursor: pointer; }
+.bonuswheel { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: auto; text-transform: uppercase; cursor: var(--cur-hand); }
 .bonuswheel .wheelwrap { position: relative; filter: drop-shadow(0 12px 30px rgba(0, 0, 0, 0.8)); }
 .bonuswheel .flapper { position: absolute; left: 50%; top: -14px; width: 0; height: 0; margin-left: -18px; border-left: 18px solid transparent; border-right: 18px solid transparent; border-top: 44px solid #f4ead0; transform-origin: 50% 0; filter: drop-shadow(0 3px 2px rgba(0,0,0,.7)); }
 .bonuswheel .flapper.flap { animation: flap 0.12s; }
@@ -358,7 +358,7 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .wheelsvg .chv.hot { fill: var(--debt); }
 .wheelsvg .lv { font-size: 13px; fill: #1a0d06; }
 .wheelsvg g.pk path { transition: filter .12s, opacity .12s; }
-.wheelsvg g.pk.pickable { cursor: pointer; }
+.wheelsvg g.pk.pickable { cursor: var(--cur-hand); }
 .wheelsvg g.pk.sel path.nb, .wheelsvg g.pk.sel path.mb { filter: brightness(1.55); stroke: #fff; stroke-width: 3; }
 .wheelsvg g.pk.also path.nb { stroke: #ffd24a; stroke-width: 3; stroke-dasharray: 6 4; }
 .wheelsvg g.pk.picked path { animation: pk-pick .48s ease-out; }
@@ -381,6 +381,9 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 /* The odds board, bottom left: an LED scoreboard like the ones over real roulette tables. */
 #board { position: absolute; left: 30px; top: 248px; background: rgba(8, 6, 4, 0.82); border: 2px solid #6a5220; padding: 6px 10px 8px; display: flex; flex-direction: column; gap: 3px; font-size: 17px; line-height: 1.05; color: #ffd98a; text-shadow: 0 0 6px rgba(255, 180, 60, 0.45); box-shadow: 5px 5px 0 rgba(0, 0, 0, 0.6); pointer-events: none; }
 #board.low { top: auto; bottom: 26px; }
+#board.side { left: auto; right: 24px; top: auto; bottom: 84px; width: min(410px, 32vw); font-size: 15px; gap: 1px; padding: 4px 10px 6px; }
+#board.side .b-c b { font-size: 17px; }
+#board.side .b-row { gap: 9px; }
 #board .b-head { font-size: 14px; letter-spacing: 1px; color: #b89a5a; }
 #board .b-row { display: flex; gap: 12px; align-items: baseline; }
 #board .b-c { display: flex; gap: 5px; align-items: baseline; }
@@ -403,7 +406,7 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 .card {
   --edge: #9a9aa2; --edge2: #5c5c64; --glow: rgba(200, 200, 210, 0); --ink: #ece6d6; --tint: #6c6c78;
   --rx: 0deg; --ry: 0deg; --mx: 50%; --my: 30%;
-  position: relative; width: 240px; min-height: 360px; padding: 4px; border: 0; border-radius: 14px; cursor: pointer;
+  position: relative; width: 240px; min-height: 360px; padding: 4px; border: 0; border-radius: 14px; cursor: var(--cur-hand);
   font-family: inherit; color: var(--ink); text-transform: uppercase; text-shadow: none;
   background: linear-gradient(160deg, var(--edge), var(--edge2) 55%, var(--edge));
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(0, 0, 0, 0.8), 0 0 26px var(--glow);
@@ -472,3 +475,19 @@ button.row:hover:not(:disabled) *, button.row.sel:not(:disabled) * { color: var(
 @keyframes sparkle { from { background-position: 0 0, 19px 23px; } to { background-position: 0 -82px, 19px -71px; } }
 @keyframes legendPulse { from { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.75), 0 0 16px var(--glow); } to { box-shadow: 0 14px 30px rgba(0, 0, 0, 0.75), 0 0 46px var(--glow); } }
 @media (max-width: 800px) { .card { width: 200px; min-height: 320px; } .card .c-face { min-height: 312px; } .card .c-art { height: 120px; } .card .c-art img { width: 120px; height: 120px; } }
+
+/* Explanations that change on hover keep one fixed height, so the menu never jumps. */
+.hoverinfo { height: calc(4 * 1.1em); overflow: hidden; flex: none; }
+.start .foot.hoverinfo { height: calc(4 * 1.05em); }
+.wheelwrap2 .center { top: 30%; transform: translateX(-50%); height: 40%; align-content: start; }
+
+
+/* The game's own mouse pointer: a cream arrow, gold over things you can click; none while walking. */
+:root { --cur: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2226%22%20height%3D%2226%22%20viewBox%3D%220%200%2026%2026%22%3E%3Cpath%20d%3D%22M3%202%20L3%2021%20L8%2016.5%20L11.5%2024%20L15%2022.5%20L11.6%2015.2%20L18.5%2015%20Z%22%20fill%3D%22%23f4ead0%22%20stroke%3D%22%23120a06%22%20stroke-width%3D%222%22%20stroke-linejoin%3D%22round%22/%3E%3Cpath%20d%3D%22M5%205.5%20L5%2017%20L8.4%2014%20L14%2013.6%20Z%22%20fill%3D%22%23ffffff%22%20opacity%3D%22.55%22/%3E%3C/svg%3E") 3 2, default; --cur-hand: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%2226%22%20height%3D%2226%22%20viewBox%3D%220%200%2026%2026%22%3E%3Cpath%20d%3D%22M3%202%20L3%2021%20L8%2016.5%20L11.5%2024%20L15%2022.5%20L11.6%2015.2%20L18.5%2015%20Z%22%20fill%3D%22%23ffd24a%22%20stroke%3D%22%23120a06%22%20stroke-width%3D%222%22%20stroke-linejoin%3D%22round%22/%3E%3Cpath%20d%3D%22M5%205.5%20L5%2017%20L8.4%2014%20L14%2013.6%20Z%22%20fill%3D%22%23fff6c8%22%20opacity%3D%22.55%22/%3E%3C/svg%3E") 3 2, pointer; }
+html, body, #app canvas { cursor: var(--cur); }
+button:not(:disabled), .pickable, a { cursor: var(--cur-hand); }
+body.fp, body.fp * { cursor: none !important; }
+body.hot #app canvas { cursor: var(--cur-hand); }
+#itemtip .hint { margin-top: 4px; font-size: 15px; color: var(--luck); opacity: .85; }
+#slip .rule { color: var(--debt); font-size: 19px; text-transform: uppercase; }
+#slip .news { color: #9ad0ff; font-size: 18px; text-transform: uppercase; opacity: .9; }

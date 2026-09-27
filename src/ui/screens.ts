@@ -354,7 +354,8 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
   let ball = balls.some((b) => b.id === profile.lastBall) ? profile.lastBall : 'stahl';
   const ballValue = h('span', { class: 'v' });
   let stage = Math.min(profile.lastStage ?? 0, profile.maxStage ?? 0);
-  const info = h('div', { class: 'foot' });
+  // Fixed height: the explanation changes on hover, the menu must not jump.
+  const info = h('div', { class: 'foot hoverinfo' });
   const kitValue = h('span', { class: 'v' });
   const stageValue = h('span', { class: 'v' });
   const renderValues = () => {
@@ -380,7 +381,7 @@ export function startView(profile: Profile, locked: Set<string>, hd: StartHandle
   const stepStage = (d: number) => {
     stage = Math.max(0, Math.min(profile.maxStage ?? 0, stage + d));
     renderValues();
-    info.textContent = `Schuldenstufe ${stage}: ${STAGES.slice(1, stage + 1).map((s) => s.desc).join(' ') || STAGES[0].desc}`;
+    info.textContent = `Schuldenstufe ${stage} – ${STAGES[stage].name}: ${STAGES[stage].desc}${stage > 1 ? ' Dazu alles aus den Stufen davor.' : ''}`;
   };
   renderValues();
   info.textContent = 'Du hast dir Geld bei den falschen Leuten geliehen. Nach je drei Drehs kommen sie an die Kasse. Setz dein echtes Geld, sammel Talismane – und bezahl.';
@@ -589,7 +590,7 @@ function stat(k: string, v: string): HTMLElement {
 // ---- Cigarette machine ------------------------------------------------------------------------
 
 export function automatView(run: Run, locked: Set<string>, buy: (id: string) => void, close: () => void): HTMLElement {
-  const detail = h('div', { class: 'info', style: 'min-height:2.2em' });
+  const detail = h('div', { class: 'info hoverinfo' });
   const list = h('div', { class: 'rows' }, label(`BARGELD ${fmt(run.cash)} · TASCHE ${run.smokes.length}/${MAX_CONSUMABLES}`));
   for (const c of Object.values(CONSUMABLES)) {
     if (locked.has(c.id)) {

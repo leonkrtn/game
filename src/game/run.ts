@@ -1292,10 +1292,16 @@ export class Run {
   /** Swaps an item with its neighbour; order matters for the mirror. */
   moveItem(uid: number, dir: -1 | 1): boolean {
     const i = this.items.findIndex((t) => t.uid === uid);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= this.items.length) return false;
+    return this.moveItemTo(uid, i + dir);
+  }
+
+  /** Puts an item at a new place in the row (drag and drop on the table). */
+  moveItemTo(uid: number, j: number): boolean {
+    const i = this.items.findIndex((t) => t.uid === uid);
+    if (i < 0 || j < 0 || j >= this.items.length || i === j) return false;
     const clock = this.clockBonus;
-    [this.items[i], this.items[j]] = [this.items[j], this.items[i]];
+    const [t] = this.items.splice(i, 1);
+    this.items.splice(j, 0, t);
     // A mirror next to a pocket watch copies its extra spin.
     const d = Math.max(this.clockBonus - clock, 1 - this.roundsLeft);
     this.roundsLeft += d;

@@ -96,6 +96,7 @@ export class Game {
   private closePause(): void {
     this.paused = false;
     closeModal();
+    if (this.mode === 'room') this.capturePointer();
   }
 
   // ---- First-run tutorial: one hint at a time, each cleared by doing it ----------------
@@ -124,7 +125,6 @@ export class Game {
     saveProfile(this.profile);
     this.showHint();
   }
-  private dragLook = false;
   private hintTick = -1;
 
   /** Captures the mouse for first-person look. Some embeds refuse; then dragging still works. */
@@ -142,7 +142,6 @@ export class Game {
   private releasing = false;
 
   private releasePointer(): void {
-    this.dragLook = false;
     if (document.pointerLockElement) {
       this.releasing = true;
       document.exitPointerLock();
@@ -162,18 +161,18 @@ export class Game {
     this.world.sensitivity = this.profile.mouse / 5;
 
     const canvas = this.world.renderer.domElement;
-    canvas.addEventListener('mousemove', (e) => {
-      this.mouse = { x: e.clientX, y: e.clientY };
-      // First person: mouse look while the pointer is captured, or while dragging without capture.
-      if (this.mode === 'room' && !modalOpen() && (document.pointerLockElement === canvas || this.dragLook)) {
+    // On the window, so HUD elements under the hidden pointer never swallow a turn.
+    window.addEventListener('mousemove', (e) => {
+      if (e.target === canvas) this.mouse = { x: e.clientX, y: e.clientY };
+      // First person: the mouse turns the view directly.
+      // Without capture (some embeds refuse it) the hidden cursor still turns the view directly.
+      if (this.mode === 'room' && !modalOpen()) {
         this.world.look(e.movementX, e.movementY);
       }
     });
-    canvas.addEventListener('mouseup', () => (this.dragLook = false));
     canvas.addEventListener('mousedown', (e) => {
       sfx.unlock();
       if (this.mode === 'room' && !modalOpen()) {
-        this.dragLook = true;
         this.capturePointer();
         return;
       }
@@ -182,12 +181,22 @@ export class Game {
         return;
       }
       if (this.mode === 'table') {
+        // A talisman under the pointer is picked up and can be dragged to another place.
+        if (e.button === 0 && this.world.startDrag(e.clientX, e.clientY)) {
+          sfx.pickup();
+          $('itemtip').classList.add('hidden');
+          return;
+        }
         if (e.button === 0) this.placeChip();
         if (e.button === 2) this.takeChip();
       } else if (this.mode === 'spinning' && this.spinStage === 'scoring') {
         this.seqWait = 0;
       }
     });
+    window.addEventListener('mousemove', (e) => {
+      if (this.world.isDragging) this.world.moveDrag(e.clientX, e.clientY);
+    });
+    window.addEventListener('mouseup', () => this.dropItem());
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('wheel', (e) => {
       if (this.mode !== 'table') return;
@@ -199,6 +208,12 @@ export class Game {
     window.addEventListener('keydown', () => sfx.unlock(), { once: true });
     // Esc also frees the mouse without a key event reaching the page: treat losing it like Esc.
     document.addEventListener('pointerlockchange', () => {
+      // A capture that arrives after we already left the room (at the table, in a menu) is dropped again.
+      if (document.pointerLockElement && !(this.mode === 'room' && !modalOpen())) {
+        this.releasing = true;
+        document.exitPointerLock();
+        return;
+      }
       if (!document.pointerLockElement && !this.releasing && this.mode === 'room' && !modalOpen()) this.openPause();
       this.releasing = false;
     });
@@ -337,8 +352,10 @@ export class Game {
   // ---- Modes -------------------------------------------------------------------
 
   private enterRoom(): void {
+    if (this.world.isDragging) this.dropItem();
     this.mode = 'room';
-    this.dragLook = false;
+    // Back on your feet: take the mouse again right away (works whenever the browser allows it).
+    if (!modalOpen()) this.capturePointer();
     this.osdDirty = true;
     this.world.cameraMode = 'room';
     this.world.standAtTable(false);
@@ -805,6 +822,19 @@ export class Game {
     this.renderTable();
   }
 
+  /** Lets go of a dragged talisman: it takes the new place in the row. */
+  private dropItem(): void {
+    const d = this.world.endDrag();
+    if (!d) return;
+    const from = this.run.items.findIndex((t) => t.uid === d.uid);
+    if (from !== d.slot && this.run.moveItemTo(d.uid, d.slot)) {
+      sfx.chip();
+      if (this.run.has('spiegel')) toast('NEUE REIHENFOLGE. DER SPIEGEL KOPIERT JETZT SEINEN RECHTEN NACHBARN.');
+    } else sfx.select();
+    this.syncWorld();
+    this.renderTable();
+  }
+
   private toggleMagnet(): void {
     if (!this.run.toggleMagnet()) {
       sfx.error();
@@ -884,6 +914,7 @@ export class Game {
 
   private spin(force = false): void {
     if (this.mode !== 'table' || this.run.phase !== 'betting') return;
+    if (this.world.isDragging) this.dropItem();
     if (this.betWait > 0 && !force) {
       toast('EINEN MOMENT – DER CROUPIER NIMMT NOCH EINSÄTZE AN.');
       return;
@@ -1244,7 +1275,7 @@ export class Game {
   }
 
   private renderOsdNow(): void {
-    renderOsd(this.run, Math.round(this.shownCashValue), this.tape, this.mode === 'room');
+    renderOsd(this.run, Math.round(this.shownCashValue), this.tape, this.mode === 'room' || this.mode === 'table');
     this.osdDirty = false;
   }
 
@@ -1308,9 +1339,14 @@ export class Game {
       }
     }
 
-    $('crosshair').classList.toggle('hidden', !(this.mode === 'room' && !modalOpen()));
+    const fp = this.mode === 'room' && !modalOpen();
+    $('crosshair').classList.toggle('hidden', !fp);
+    // Walking around: no mouse pointer on screen, only the crosshair.
+    document.body.classList.toggle('fp', fp);
+    // Over a field or a showcase piece the pointer turns gold.
+    document.body.classList.toggle('hot', !modalOpen() && ((this.mode === 'table' && !!this.hover) || (this.mode === 'vitrine' && this.world.hoverShowcase !== undefined)));
     renderGoal(this.run, this.mode === 'room' && !modalOpen());
-    renderBoard(this.run, (this.mode === 'room' || this.mode === 'table' || this.mode === 'spinning') && !modalOpen() && !!this.run && this.run.phase !== 'gameover', this.mode === 'spinning');
+    renderBoard(this.run, (this.mode === 'room' || this.mode === 'table' || this.mode === 'spinning') && !modalOpen() && !!this.run && this.run.phase !== 'gameover', this.mode === 'spinning', this.mode === 'table');
     if (Math.floor(this.tape * 2) !== this.hintTick) {
       this.hintTick = Math.floor(this.tape * 2);
       this.showHint();
@@ -1392,7 +1428,7 @@ export class Game {
     const x = fp ? window.innerWidth / 2 : this.mouse.x;
     const y = fp ? window.innerHeight / 2 : this.mouse.y;
     const uid = x >= 0 ? this.world.pickItem(x, y) : undefined;
-    renderItemTip(this.run, uid, x, y);
+    renderItemTip(this.run, uid, x, y, fp ? undefined : 'ZIEHEN ZUM UMSORTIEREN');
   }
 
   private frameTable(dt: number, presses: string[]): void {
@@ -1420,7 +1456,7 @@ export class Game {
     }
     if (this.mode !== 'table') return;
 
-    const field = this.mouse.x >= 0 ? this.world.raycastField(this.mouse.x, this.mouse.y) : undefined;
+    const field = this.mouse.x >= 0 && !this.world.isDragging ? this.world.raycastField(this.mouse.x, this.mouse.y) : undefined;
     if (field !== this.hover) {
       this.hover = field;
       this.world.hoverField = field && FIELD_BY_ID[field].numbers.length <= 1 ? field : undefined;
@@ -1430,7 +1466,7 @@ export class Game {
     // Odds only change when the table changes (renderTable clears this), not every frame.
     this.chanceCache ??= this.run.finalChances();
     renderFieldInfo(this.run, field, this.mouse.x, this.mouse.y - 14, this.chanceCache);
-    if (!field) this.hoverItems();
+    if (!field && !this.world.isDragging) this.hoverItems();
     else $('itemtip').classList.add('hidden');
 
     if (this.rushLeft !== undefined) {
