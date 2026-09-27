@@ -149,6 +149,8 @@ export class Game {
   private releasedAt = -1e9;
   private lockedAt = -1e9;
   private unlockedSince = 0;
+  /** Last Esc (or Q) press, seen directly on the key event. */
+  private lastEscAt = -1e9;
   private lockRetry = 0;
 
   private releasePointer(): void {
@@ -216,6 +218,9 @@ export class Game {
       if (list[j]) this.selectChip(list[j]);
     }, { passive: true });
     window.addEventListener('keydown', () => sfx.unlock(), { once: true });
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape' || e.code === 'KeyQ') this.lastEscAt = performance.now();
+    }, true);
     // Esc also frees the mouse without a key event reaching the page: treat losing it like Esc.
     // A capture refused right after Esc (browsers block it for about a second): try once more a little later.
     document.addEventListener('pointerlockerror', () => {
@@ -239,7 +244,8 @@ export class Game {
       // Only losing a capture we really had (and did not give up ourselves) counts as Esc.
       const had = this.lockedAt > this.releasedAt;
       this.releasedAt = now;
-      if (had && now - this.lockedAt > 300 && this.mode === 'room' && !modalOpen()) this.openPause();
+      // An Esc the game saw itself is already handled (pause, standing up, leaving a station).
+      if (had && now - this.lockedAt > 300 && now - this.lastEscAt > 800 && this.mode === 'room' && !modalOpen()) this.openPause();
     });
     // The browser dropped out of fullscreen by itself (Esc in Safari): pause like Esc would.
     watchFullscreen(() => {
@@ -379,7 +385,8 @@ export class Game {
     if (this.world.isDragging) this.dropItem();
     this.mode = 'room';
     // Back on your feet: take the mouse again right away (works whenever the browser allows it).
-    if (!modalOpen()) this.capturePointer();
+    // Not when Esc brought you here: that same Esc would drop the capture again and pause the game.
+    if (!modalOpen() && performance.now() - this.lastEscAt > 500) this.capturePointer();
     this.osdDirty = true;
     this.world.cameraMode = 'room';
     this.world.standAtTable(false);
@@ -1367,6 +1374,8 @@ export class Game {
       }
     }
 
+    // The rolling sound only while the ball really rolls (not in a pause, not after it landed).
+    if (this.paused || !(this.mode === 'spinning' && this.spinStage === 'rolling')) sfx.roll(0);
     const fp = this.mode === 'room' && !modalOpen();
     $('crosshair').classList.toggle('hidden', !fp);
     // Walking around: no mouse pointer on screen, only the crosshair.

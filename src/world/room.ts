@@ -473,17 +473,17 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     g.add(mesh(tubeGeo, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(glare), transparent: true, depthWrite: false, toneMapped: false }), SX, SY, FZ + 0.009, false));
     /** Rounded tube corners, a dark edge and scanlines over every frame. */
     const tube = () => {
-      cg.fillStyle = 'rgba(0,0,0,0.18)';
+      cg.fillStyle = 'rgba(0,0,0,0.12)';
       for (let y = 0; y < 120; y += 2) cg.fillRect(0, y, 160, 1);
-      const vg = cg.createRadialGradient(80, 60, 40, 80, 60, 100);
+      const vg = cg.createRadialGradient(80, 60, 55, 80, 60, 105);
       vg.addColorStop(0, 'rgba(0,0,0,0)');
-      vg.addColorStop(1, 'rgba(0,0,0,0.7)');
+      vg.addColorStop(1, 'rgba(0,0,0,0.35)');
       cg.fillStyle = vg;
       cg.fillRect(0, 0, 160, 120);
       cg.fillStyle = '#050505';
       cg.beginPath();
       cg.rect(0, 0, 160, 120);
-      cg.roundRect(2, 2, 156, 116, 14);
+      cg.roundRect(0, 0, 160, 120, 7);
       cg.fill('evenodd');
     };
     const tvLight = new THREE.PointLight(0x6a8aff, 1.2, 3.2, 2);

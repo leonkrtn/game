@@ -58,6 +58,27 @@ class Sfx {
     src.start(t);
   }
 
+  /** A noise burst with an exponential decay and a chosen filter: the base of every mechanical sound. */
+  private burst(dur: number, vol: number, type: BiquadFilterType, freq: number, q = 1, when = 0): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || this.muted) return;
+    const t = ctx.currentTime + when;
+    const n = Math.ceil(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.exp((-6 * i) / n);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    const g = ctx.createGain();
+    g.gain.value = vol;
+    src.connect(f).connect(g).connect(this.master);
+    src.start(t);
+  }
+
   chip(): void {
     this.noise(0.05, 0.5, 4200);
     this.tone(1800, 0.05, 'triangle', 0.08);
@@ -68,24 +89,41 @@ class Sfx {
   select(): void {
     this.tone(900, 0.05, 'triangle', 0.08);
   }
+  private lastTick = 0;
+
+  /** The ball clicking over a brass separator: tiny, bright and metallic. */
   tick(strength: number): void {
-    this.noise(0.025, 0.15 + 0.35 * strength, 5000);
+    const ctx = this.ctx;
+    if (!ctx) return;
+    // A real ball rattles, it does not machine-gun: at most one click every 30 ms.
+    if (ctx.currentTime - this.lastTick < 0.03) return;
+    this.lastTick = ctx.currentTime;
+    const s = Math.max(0, Math.min(1, strength));
+    const f = 3400 + Math.random() * 900;
+    this.tone(f, 0.018, 'triangle', 0.02 + 0.06 * s);
+    this.tone(f * 1.52, 0.012, 'sine', 0.01 + 0.03 * s);
+    this.burst(0.012, 0.04 + 0.1 * s, 'highpass', 5000, 0.7);
   }
+  /** The croupier flicks the ball onto the track: a short soft whoosh, no drone. */
   spin(): void {
-    this.noise(0.6, 0.12, 1200);
-    this.tone(220, 0.5, 'sine', 0.05, 0, 200);
+    this.burst(0.35, 0.09, 'lowpass', 900, 0.6);
+    this.burst(0.12, 0.05, 'bandpass', 2400, 1.2, 0.02);
   }
-  /** The ball knocking on a brass diamond: a hard, bright click with a little ring. */
+  /** The ball knocking on a brass diamond: a hard "tock" with a short ring. */
   knock(strength: number): void {
-    this.noise(0.03, 0.4 + 0.5 * strength, 6500);
-    this.tone(2400 + Math.random() * 400, 0.06, 'triangle', 0.08 * strength);
-    this.tone(900, 0.04, 'square', 0.03 * strength);
+    const s = Math.max(0, Math.min(1, strength));
+    this.tone(1250 + Math.random() * 150, 0.045, 'sine', 0.05 + 0.1 * s);
+    this.tone(2900 + Math.random() * 300, 0.03, 'triangle', 0.02 + 0.05 * s);
+    this.burst(0.02, 0.08 + 0.14 * s, 'bandpass', 3200, 1.5);
   }
 
-  // The ball rolling on the wooden track: filtered noise that follows its speed.
+  // The ball rolling on the lacquered track: soft, dark rushing noise that follows its speed,
+  // with a gentle pulse once per turn.
   private rollSrc?: AudioBufferSourceNode;
   private rollGain?: GainNode;
   private rollFilter?: BiquadFilterNode;
+  private rollHigh?: GainNode;
+  private rollLfo?: OscillatorNode;
 
   /** 0 = silent, 1 = the ball races around the track. */
   roll(level: number): void {
@@ -94,32 +132,60 @@ class Sfx {
     if (!this.rollSrc) {
       const buf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
       const d = buf.getChannelData(0);
-      let last = 0;
+      // Pink-ish noise: smooth, no clicks.
+      let b0 = 0, b1 = 0, b2 = 0;
       for (let i = 0; i < d.length; i++) {
-        // Brown-ish noise with tiny grain clicks: wood and steel.
-        last = (last + (Math.random() * 2 - 1) * 0.08) * 0.985;
-        d[i] = last * 3 + (Math.random() < 0.002 ? (Math.random() - 0.5) * 0.6 : 0);
+        const w = Math.random() * 2 - 1;
+        b0 = 0.99765 * b0 + w * 0.099;
+        b1 = 0.963 * b1 + w * 0.2965;
+        b2 = 0.57 * b2 + w * 1.0527;
+        d[i] = (b0 + b1 + b2 + w * 0.1848) * 0.12;
       }
       this.rollSrc = ctx.createBufferSource();
       this.rollSrc.buffer = buf;
       this.rollSrc.loop = true;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = 180;
       this.rollFilter = ctx.createBiquadFilter();
-      this.rollFilter.type = 'bandpass';
-      this.rollFilter.Q.value = 0.8;
+      this.rollFilter.type = 'lowpass';
+      this.rollFilter.Q.value = 0.5;
       this.rollGain = ctx.createGain();
       this.rollGain.gain.value = 0;
-      this.rollSrc.connect(this.rollFilter).connect(this.rollGain).connect(this.master);
+      // A faint steel shimmer on top.
+      const sh = ctx.createBiquadFilter();
+      sh.type = 'bandpass';
+      sh.frequency.value = 4200;
+      sh.Q.value = 2;
+      this.rollHigh = ctx.createGain();
+      this.rollHigh.gain.value = 0;
+      // Once-per-turn pulse.
+      const pulse = ctx.createGain();
+      pulse.gain.value = 1;
+      this.rollLfo = ctx.createOscillator();
+      this.rollLfo.frequency.value = 2;
+      const depth = ctx.createGain();
+      depth.gain.value = 0.25;
+      this.rollLfo.connect(depth).connect(pulse.gain);
+      this.rollSrc.connect(hp).connect(this.rollFilter).connect(this.rollGain).connect(pulse);
+      this.rollSrc.connect(sh).connect(this.rollHigh).connect(pulse);
+      pulse.connect(this.master);
       this.rollSrc.start();
+      this.rollLfo.start();
     }
     const t = ctx.currentTime;
     const v = this.muted ? 0 : Math.max(0, Math.min(1, level));
-    this.rollGain!.gain.setTargetAtTime(v * 0.55, t, 0.05);
-    this.rollFilter!.frequency.setTargetAtTime(300 + v * 1400, t, 0.08);
+    this.rollGain!.gain.setTargetAtTime(v * v * 0.22, t, 0.06);
+    this.rollHigh!.gain.setTargetAtTime(v * v * 0.05, t, 0.06);
+    this.rollFilter!.frequency.setTargetAtTime(350 + v * 1500, t, 0.1);
+    this.rollLfo!.frequency.setTargetAtTime(0.6 + v * 1.8, t, 0.2);
   }
 
+  /** The ball drops into its pocket for good: a soft clack. */
   land(): void {
-    this.noise(0.08, 0.6, 2500);
-    this.tone(160, 0.15, 'sine', 0.15);
+    this.tone(1050, 0.05, 'triangle', 0.06);
+    this.tone(190, 0.09, 'sine', 0.07);
+    this.burst(0.03, 0.06, 'bandpass', 2200, 1);
   }
   win(big: boolean): void {
     const notes = big ? [523, 659, 784, 1047, 1319] : [523, 659, 784];
