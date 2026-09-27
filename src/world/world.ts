@@ -553,11 +553,22 @@ export class World {
     ];
     let best: (typeof targets)[number]['id'] | undefined;
     let bestDot = Math.cos(0.75);
+    // Looking at the ceiling or the floor is not looking at anything.
+    if (this.pitch > 0.35 || this.pitch < -1.05) return undefined;
+    const centre = { kasse: [KASSE.x, KASSE.z], vitrine: [VITRINE.x, VITRINE.z], smokes: [SMOKES.x, SMOKES.z] } as const;
     for (const g of targets) {
-      const dx = g.x - p.x, dz = g.z - p.z;
+      let dx = g.x - p.x, dz = g.z - p.z;
       const d = Math.hypot(dx, dz);
       if (d > g.reach) continue;
-      const dot = d < 0.35 ? 1 : (dx * f.x + dz * f.z) / d;
+      // Right at the edge the nearest point is under your feet: judge the direction by the middle instead.
+      if (d < 0.35) {
+        const [cx, cz] = g.id === 'table'
+          ? [THREE.MathUtils.clamp(p.x, t.x - t.halfW + 0.45, t.x + t.halfW - 0.45), THREE.MathUtils.clamp(p.z, t.z - t.halfD + 0.45, t.z + t.halfD - 0.45)]
+          : centre[g.id as keyof typeof centre];
+        dx = cx - p.x;
+        dz = cz - p.z;
+      }
+      const dot = (dx * f.x + dz * f.z) / Math.max(1e-6, Math.hypot(dx, dz));
       if (dot > bestDot) {
         bestDot = dot;
         best = g.id;
@@ -1113,6 +1124,7 @@ export class World {
   }
 
   setMarquee(history: { n: number; c: string }[], debt: number, round: number, rounds: number): void {
+    this.casino.setRegister(debt);
     const c = this.marqueeCanvas;
     const g = c.getContext('2d')!;
     g.fillStyle = '#050305';

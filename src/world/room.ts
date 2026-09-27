@@ -14,6 +14,8 @@ export interface Casino {
   guestSpots: { x: number; z: number; heading: number }[];
   /** Objects that fade out when they block the view onto the player. */
   occluders: THREE.Mesh[];
+  /** What the cash register's display reads (the rate that is due). */
+  setRegister(amount: number): void;
 }
 
 export function textTexture(text: string, w: number, h: number, font: string, color: string, glow?: string, bg?: string): THREE.CanvasTexture {
@@ -203,7 +205,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
       spot.shadow.bias = -0.0003;
     }
     scene.add(ring, bulb, spot, spot.target);
-    lightCone(scene, updates, x, H - 0.08, z, 0.17, 0.95, 2.2, color, 0.05);
+    // No visible light shaft: near walls and furniture it showed hard, wrong edges.
     return spot;
   };
   lamp(KASSE.x, KASSE.z + 0.8, 15);
@@ -235,6 +237,9 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   sconce(ROOM.x0 + 0.6 + 0.35, ROOM.z0, 0);
   for (const z of [-2.0, -0.05, 1.85]) sconce(ROOM.x0, z, Math.PI / 2);
   sconce(ROOM.x1, 0.75, -Math.PI / 2);
+  // Above the TV corner, which was nearly black.
+  sconce(ROOM.x1, -1.4, -Math.PI / 2);
+  sconce(SMOKES.x + 0.9, ROOM.z0, 0);
   for (const x of [VITRINE.x - 1.2, VITRINE.x + 1.2, ROOM.x0 + 1.0, ROOM.x1 - 1.2]) sconce(x, ROOM.z1, Math.PI);
 
   // Potted palms in two corners.
@@ -288,6 +293,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
   });
 
   // ---- Cashier ------------------------------------------------------------------
+  let setRegister: (amount: number) => void = () => undefined;
   {
     const K = KASSE;
     const g = new THREE.Group();
@@ -304,6 +310,15 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     register.rotation.y = -0.3;
     const lcd = mesh(new THREE.PlaneGeometry(0.2, 0.05), new THREE.MeshBasicMaterial({ map: textTexture('0000.00', 256, 64, '700 50px monospace', '#6aff7a', '#1a8a2a', '#021004'), toneMapped: false }), 0.66, 1.43, 0.12, false);
     lcd.rotation.y = -0.3;
+    let shown = -1;
+    setRegister = (amount: number) => {
+      if (amount === shown) return;
+      shown = amount;
+      const mat = lcd.material as THREE.MeshBasicMaterial;
+      mat.map?.dispose();
+      mat.map = textTexture(`${String(Math.min(99999, Math.round(amount))).padStart(4, '0')}.00`, 256, 64, '700 50px monospace', '#6aff7a', '#1a8a2a', '#021004');
+      mat.needsUpdate = true;
+    };
     g.add(register, lcd);
     for (let i = 0; i < 4; i++) {
       const bills = mesh(new THREE.BoxGeometry(0.16, 0.012, 0.075), std({ color: 0x7c9a6a, roughness: 0.9 }), -0.5 + i * 0.012, 1.162 + i * 0.012, 0.12 - i * 0.01);
@@ -368,7 +383,14 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     side.position.set(LOUNGE.x + 0.05, 0, LOUNGE.z + 0.85);
     side.add(mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.03, 24), lacquer, 0, 0.58, 0));
     side.add(mesh(new THREE.CylinderGeometry(0.03, 0.05, 0.56, 10), brass, 0, 0.28, 0));
-    side.add(mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.02, 20), phys({ color: 0x9ab8c8, transparent: true, opacity: 0.6, roughness: 0.1 }), 0.08, 0.605, 0));
+    // Smoked-glass ashtray with a rim and a hollow, not a flat white disc.
+    const glass = phys({ color: 0x3a4a50, transparent: true, opacity: 0.85, roughness: 0.08, clearcoat: 1 });
+    side.add(mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.018, 24), glass, 0.08, 0.604, 0));
+    const lip = mesh(new THREE.TorusGeometry(0.062, 0.008, 8, 24), glass, 0.08, 0.613, 0);
+    lip.rotation.x = Math.PI / 2;
+    side.add(lip);
+    side.add(mesh(new THREE.CircleGeometry(0.052, 20), std({ color: 0x151412, roughness: 0.9 }), 0.08, 0.614, 0));
+    (side.children[side.children.length - 1] as THREE.Mesh).rotation.x = -Math.PI / 2;
     if (candle) {
       const c = candle.scene.clone(true);
       c.scale.setScalar(0.8);
@@ -376,7 +398,6 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
       side.add(c);
     }
     scene.add(side);
-    smoke(scene, updates, new THREE.Vector3(LOUNGE.x + 0.13, 0.64, LOUNGE.z + 0.85));
   }
   {
     // Jukebox.
@@ -588,6 +609,7 @@ export function buildCasino(scene: THREE.Scene, base: string, chair?: GLTF, cand
     showcase,
     guestSpots,
     occluders,
+    setRegister: (amount) => setRegister(amount),
   };
 }
 

@@ -139,11 +139,13 @@ export class Game {
     }
   }
 
-  private releasing = false;
+  /** When the game itself last let go of the mouse, and when it last got it: losing it right after either is not an Esc. */
+  private releasedAt = -1e9;
+  private lockedAt = -1e9;
 
   private releasePointer(): void {
     if (document.pointerLockElement) {
-      this.releasing = true;
+      this.releasedAt = performance.now();
       document.exitPointerLock();
     }
   }
@@ -210,12 +212,16 @@ export class Game {
     document.addEventListener('pointerlockchange', () => {
       // A capture that arrives after we already left the room (at the table, in a menu) is dropped again.
       if (document.pointerLockElement && !(this.mode === 'room' && !modalOpen())) {
-        this.releasing = true;
+        this.releasedAt = performance.now();
         document.exitPointerLock();
         return;
       }
-      if (!document.pointerLockElement && !this.releasing && this.mode === 'room' && !modalOpen()) this.openPause();
-      this.releasing = false;
+      const now = performance.now();
+      if (document.pointerLockElement) {
+        this.lockedAt = now;
+        return;
+      }
+      if (now - this.releasedAt > 600 && now - this.lockedAt > 300 && this.mode === 'room' && !modalOpen()) this.openPause();
     });
     // The browser dropped out of fullscreen by itself (Esc in Safari): pause like Esc would.
     watchFullscreen(() => {
@@ -1301,6 +1307,8 @@ export class Game {
 
     if (!modalOpen()) this.overview = false;
     if (modalOpen()) {
+      // No "E …" prompt left hanging behind a menu.
+      setPrompt();
       for (const k of presses) navModal(k);
       if (this.bonusSpin && (presses.includes('Space') || presses.includes('Enter'))) {
         this.bonusSpin();
